@@ -1,0 +1,12 @@
+qwen_vl_utils
+torchvision
+torch
+flash-attn
+babel
+math_verify
+transformers
+datasets
+trl
+python-Levenshtein
+matplotlib
+deepspeed
