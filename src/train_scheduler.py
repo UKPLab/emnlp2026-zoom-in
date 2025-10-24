@@ -7,6 +7,7 @@ import signal
 import sys
 import re
 import datetime
+import json
 
 def screen_exists(screen_name):
     """Check if a screen session exists."""
@@ -105,21 +106,21 @@ def is_screen_active(screen_name):
     """Check if a screen session is still running."""
     return screen_exists(screen_name)
 
-def run_training_pipeline(vllm_screen_name, train_screen_name, train_script, train_script_kwargs, images_per_prompt=1):
+def run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, train_command, output_dir):
     """Run the complete training pipeline."""
 
     # Create output directory if it doesn't exist
-    os.makedirs(train_script_kwargs['output_dir'], exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
 
-    vllm_log_file = os.path.join(train_script_kwargs['output_dir'], 'vllm_log.txt')
-    run_log_file = os.path.join(train_script_kwargs['output_dir'], 'run_log.txt')
+    vllm_log_file = os.path.join(output_dir, 'vllm_log.txt')
+    run_log_file = os.path.join(output_dir, 'run_log.txt')
 
     # Create empty log files
     open(vllm_log_file, 'w').close()
     open(run_log_file, 'w').close()
 
     # Step 1 & 2: Start or resume VLLM server screen with CUDA_VISIBLE_DEVICES=0
-    vllm_command = f"VLLM_USE_V1=0 trl vllm-serve --model Qwen/Qwen2.5-VL-3B-Instruct --limit_image_per_prompt {images_per_prompt}"
+    #vllm_command = f"VLLM_USE_V1=0 trl vllm-serve --model Qwen/Qwen2.5-VL-3B-Instruct --limit_image_per_prompt {images_per_prompt}"
     vllm_env = {"CUDA_VISIBLE_DEVICES": "0"}
     
     start_or_resume_screen(vllm_screen_name, vllm_log_file, vllm_command, vllm_env)
@@ -139,11 +140,9 @@ def run_training_pipeline(vllm_screen_name, train_screen_name, train_script, tra
     cuda_devices = ",".join(available_gpus) if available_gpus else "1"  # Default to 1 if we can't detect GPUs
     train_env = {"CUDA_VISIBLE_DEVICES": cuda_devices}
 
-    kwarg_string = " ".join([f"--{k} {v}" for k, v in train_script_kwargs.items()])
-
     # Step 7: Launch the training
-    train_command = (f"cd /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/scripts "
-                     f"&& bash {train_script} {kwarg_string}")
+    train_command = (f"cd /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src "
+                     f"&& {train_command}")
     
     print(f"Starting training on GPUs: {cuda_devices}")
     start_or_resume_screen(train_screen_name, run_log_file, train_command, train_env)
@@ -179,42 +178,106 @@ def signal_handler(sig, frame):
     print("\nScript interrupted by user. Exiting monitoring mode...")
     sys.exit(0)
 
+def get_commands(hparams: dict, run_name: str):
+
+    resume = False
+    if "output_dir" in hparams["train_params"]:
+        resume = True
+        output_dir = hparams["train_params"]["output_dir"]
+        assert "aim_run_hash" in hparams["train_params"] and hparams["train_params"]["aim_run_hash"] is not None
+        hparams["train_params"]["model_name_or_path"] = os.path.join(hparams["train_params"]["output_dir"],
+                                                                     f"checkpoint-{hparams["train_params"]["resume_from_checkpoint"]}")
+        hparams["train_params"].pop("resume_from_checkpoint")
+
+
+    hf_cmd = "torchrun --nproc_per_node=7 --nnodes=1 grpo_jsonl_top.py"
+    for name, value in hparams["train_params"].items():
+        if isinstance(value, list):
+            inferred_value = " ".join([str(v) for v in value])
+            inferred_name = name
+        elif name == "output_dir_prefix":
+            if resume:
+                continue
+            inferred_value = os.path.join(f"{value}", f"{run_name}_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}")
+            output_dir = inferred_value
+            inferred_name = "output_dir"
+        else:
+            inferred_name = name
+            inferred_value = value
+        hf_cmd = hf_cmd + f" --{inferred_name} {inferred_value}"
+    hf_cmd = hf_cmd + f" --run_name {run_name}"
+
+    hf_cmd = hf_cmd + f" --training_mode singlenode"
+
+    vllm_cmd = "trl vllm-serve"
+    for name, value in hparams["vllm_params"].items():
+        if value == "infer":
+            if name == "model":
+                inferred_value = hparams["train_params"]["model_name_or_path"]
+            else:
+                inferred_value = hparams["train_params"][name]
+        else:
+            inferred_value = value
+
+        vllm_cmd = vllm_cmd + f" --{name} {inferred_value}"
+
+
+
+    return vllm_cmd, hf_cmd, output_dir
+
 if __name__ == "__main__":
     # Register signal handler for graceful exit
     signal.signal(signal.SIGINT, signal_handler)
-    debug = False
 
-    run_dir = f"/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs"
+    script_dir = f"/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/scripts"
 
 
-    if debug:
-        vllm_screen_name = "2_auto_vllm"
-        train_screen_name = "2_auto_run"
+    runs = [
+        {"json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_image_5k_250_exploration_tanh_1_epoch_constant_lr.json",
+         "shell_number": 3,
+         "path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_image_5k_250_exploration_tanh_1_epoch_constant_lr_20251022_121241",
+         "state": "running"
+         },
+        {"json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_image_5k_250_only_exploration_tanh_1_epoch.json",
+         "shell_number": 5,
+         "path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_image_5k_250_only_exploration_tanh_1_epoch_20251022_125452",
+         "state": "running"},
+        {"json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_image_5k_250_tanh_1_epoch_mask_image.json",
+         "shell_number": 2,
+         "path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_image_5k_250_tanh_1_epoch_mask_image_20251022_135223",
+         "state": "running"},
+        {"json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_image_5k_250_tanh_1_epoch_mask_image_pad.json",
+         "shell_number": 4,
+         "path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_image_5k_250_tanh_1_epoch_mask_image_pad_20251022_140733",
+         "state": "running"},
+        {"json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
+         "shell_number": 1,
+         "path": "",
+         "state": "running"},
+        {"json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_image_5k_250_only_exploration_tanh_1_epoch_exploration_prompt.json",
+         "shell_number": 6,
+         "path": "",
+         "state": "to_be_launched"},
 
-        runs = [
-            {"script": "run_training_standard_test.sh", "images": 1},
-            {"script": "run_training_rethink_text_test.sh", "images": 1},
-            {"script": "run_training_rethink_image_test.sh", "images": 2},
-        ]
 
-    else:
-        vllm_screen_name = "8_auto_vllm"
-        train_screen_name = "8_auto_run"
 
-        runs = [
-            {"run_name": "run_training_rethink_image", "images": 2},
-            #{"script": "run_training_rethink_text.sh", "images": 1},
-            #{"script": "run_training_standard.sh", "images": 1},
-        ]
+    ]
 
     for run in runs:
-        # Run the training pipeline
-        current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        if run["state"] == "to_be_launched":
+            vllm_screen_name = f"{run['shell_number']}_auto_vllm"
+            train_screen_name = f"{run['shell_number']}_auto_run"
 
-        run_training_pipeline(vllm_screen_name, train_screen_name, train_script=f'{run["run_name"]}.sh',
-                              train_script_kwargs={"logging":True,
-                                                   "output_dir": os.path.join(run_dir, f"{run['run_name']}_{current_time}"),
-                                                   #"data_subset": "7500:8000"
-                                                   },
-                              images_per_prompt=run["images"])
-        time.sleep(60)
+            # Run the training pipeline
+            current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            full_hparams = json.load(open(os.path.join(script_dir, run["json_name"]), "r"))
+
+            run_name = run["json_name"].removesuffix(".json")
+
+            vllm_command, train_command, output_dir = get_commands(full_hparams, run_name)
+            print(f"starting run: {run_name}")
+            print(f"vllm_command: {vllm_command}")
+            print(f"hf_command: {train_command}")
+
+            run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, train_command, output_dir=output_dir)

@@ -1,0 +1,511 @@
+# Copyright 2025 The HuggingFace Team. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import os
+import subprocess
+import pathlib
+import json
+from dataclasses import dataclass, field, asdict
+from typing import Optional
+from functools import partial
+from aim.hugging_face import AimCallback
+from trl import GRPOConfig, ModelConfig, ScriptArguments, TrlParser, get_peft_config
+
+import determined as det
+
+from open_r1.utils.logger import setup_project_logging
+from open_r1.utils.tools import Tool, Message, TOOL_CONFIGS
+from open_r1.utils.rewards import curiosity_reward, pr_penalty_reward, format_reward, accuracy_reward, \
+    format_reward_only_answer, mutual_information_reward, constant_exploration
+from open_r1.trainer import VLMGRPOTrainerVLLM, UpdatedVLMGRPOTrainerVLLM
+from open_r1.preprocess_data import prepare_data
+from open_r1.utils.prompts import get_question_template
+from open_r1.vlm_modules import *
+
+
+@dataclass
+class GRPOScriptArguments(ScriptArguments):
+    """
+    Script arguments for the GRPO training script.
+    """
+    data_file_paths: str = field(
+        default=None,
+        metadata={"help": "Paths to data files, separated by ':'"},
+    )
+    image_folders: str = field(
+        default=None,
+        metadata={"help": "Paths to image folders, separated by ':'"},
+    )
+    arrow_cache_dir: str = field(
+        default=None,
+        metadata={"help": "Path to arrow cache directory"},
+    )
+    val_split_ratio: float = field(
+        default=0.0,
+        metadata={"help": "Ratio of validation split, default 0.0"},
+    )
+    data_subset: Optional[str] = field(
+        default=None,
+        metadata={"help": "Slice notation for dataset subset (e.g. '0:100', '::2'). None uses full dataset"},
+    )
+    reward_funcs: list[str] = field(
+        default_factory=lambda: ["accuracy"],
+        metadata={"help": "List of reward functions. Possible values: 'accuracy', 'format'"},
+    )
+    reward_func_weights: list[float] = field(
+        default_factory=lambda: [1.0],
+        metadata={"help": "Weights for reward functions. Must have the same length as reward_funcs"},
+    )
+    max_pixels: Optional[int] = field(
+        default=12845056,
+        metadata={"help": "Maximum number of pixels for the image (for QwenVL)"},
+    )
+    min_pixels: Optional[int] = field(
+        default=3136,
+        metadata={"help": "Minimum number of pixels for the image (for QwenVL)"},
+    )
+    max_anyres_num: Optional[int] = field(
+        default=12,
+        metadata={"help": "Maximum number of anyres blocks for the image (for InternVL)"},
+    )
+    reward_method: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Choose reward method: 'default', 'mcp', ..."
+        },
+    )
+    logging: Optional[bool] = field(
+        default=None,
+        metadata={
+            "help": "if True, saves config and checkpoints to local folder and logs to aim"
+        }
+    )
+    multi_turn: Optional[str] = field(
+        default= None,
+        metadata={
+            "help": "which version of multi_turn should be used. Options are none, 'text', 'image'"
+        }
+    )
+    chat_template: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "path to chat template json file. If None, uses the chat template from the model "
+        }
+    )
+    prompt_type: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "which type of initial prompt to use. supported are 'default' and 'no_think'"
+        }
+    )
+    tool_use_penalty_threshold: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "threshold for penalizing tool use. Must be set if 'pr_penalty' should be used in reward_funcs "
+        }
+    )
+    pixel_reasoning_threshold: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "threshold for penalizing tool use. Must be set if 'curiosity' should be used in reward_funcs "
+        }
+    )
+    max_tool_uses: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "maximum number of tool uses allowed. This is a technical hyperparameter preventing us from running into OOM."
+                    "When setting up vLLM engine, limit_image_per_prompt >= max_tool_uses + input_image_count "
+        }
+    )
+    tool_config: Optional[str] = field(
+        default=None,
+        metadata = {
+            "help": "pre-configured tool configuration to use"
+        }
+    )
+    global_buffer: Optional[bool] = field(
+        default=False,
+        metadata = {
+            "help": "whether to share the buffer across processes"
+        }
+    )
+    mutual_information_clip_value: Optional[float] = field(
+    default = None,
+    metadata = {
+        "help": "the clip value for the mean-like mutual information reward. mean(clip(contrast, +-gamma)) "
+    })
+    mutual_information_threshold: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "the minimal threshold for the median-like mutual information reward. #{contrast > delta}/#contrast"
+        }
+
+    )
+    mutual_information_len_exponent: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "the exponent alpha for length-adaptive reward: (len/len_scaling)^alpha"
+        }
+    )
+
+    mutual_information_len_scaling: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "the scale factor for length-adaptive reward: (len/len_scaling)^alpha. None means max_generation_len"
+        }
+    )
+
+    mutual_information_mean_threshold: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "the mean threshold for MI reward: mean(clip(PMI) - threshold)."
+        }
+    )
+
+    mutual_information_discretize: Optional[bool] = field(
+        default = False,
+        metadata = {
+            "help": "whether to discretize the reward at the end: reward = -1 if reward < 0, else +1"
+        }
+    )
+
+    mutual_information_quantile: Optional[float] = field(
+        default = None,
+        metadata={
+            "help": "use the q-th quantile: quantile(clip(PMI, gamma) - threshold)"
+        }
+    )
+
+    mi_tanh: Optional[bool] = field(
+        default = False,
+        metadata={
+            "help": "whether to use a tanh function: torch.tanh(torch.clamp(contrast_diff, min=-gamma, max=gamma) * length_factor)"
+        }
+    )
+
+    ignored_prefix_len: Optional[int] = field(
+        default = None,
+        metadata={
+            "help": "the diff in the first few (1-3) tokens is very high, we can ignore it."
+        }
+    )
+
+    training_mode: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "run mode. 'singlenode' or 'multinode'"
+        }
+    )
+
+    vllm_devices: Optional[int] = field(
+        default=1,
+        metadata={
+            "help": "the number of devices for the vllm server. will be mapped to range(vllm_devices) on node 0"
+        }
+    )
+
+    mi_masked_vision_forward_model: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "which model to use to calculate the masked vision forward pass for MI reward. "
+                    "values can be 'self' or 'reference'"
+        }
+    )
+
+    mi_full_forward_model: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "which model to use to calculate the full forward pass for MI reward. "
+                    "values can be 'self' or 'reference'"
+        }
+    )
+
+    mi_mask: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "which part to mask. look into parser.py for details "
+        }
+    )
+
+    scoring_batch_size_multiplier: Optional[int] = field(
+        default=1,
+        metadata={
+            "help": "this value is multiplied to the per_device_train_batch_size for forward passes. "
+                    "(per_device_train_batch_size * scoring_batch_size_multiplier) must divide "
+                    "(generation_batch_size / num_gpus) evenly"
+        }
+    )
+    # tool_use_rate_threshold = 0.5
+    # exploration_threshold = 100
+    eps_tool_use_rate_threshold: Optional[float] = field(
+        default = None,
+        metadata={
+            "help": "if the tool use rate is above this threshold for a group, we will increase the exploration counter "
+        }
+    )
+
+    eps_exploration_threshold: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "if the exploration counter is above this threshold, we will switch into pruning mode"
+        }
+    )
+
+    aim_run_hash: Optional[str] = field(
+        default = None,
+        metadata={
+            "help": "if not None, set it to be the aim run hash"
+        }
+    )
+
+    constant_exploration: Optional[float] = field(
+        default = None,
+        metadata={
+            "help": "the constant exploration reward for the tool use"
+        }
+    )
+
+
+
+
+@dataclass
+class GRPOModelConfig(ModelConfig):
+    freeze_vision_modules: bool = False
+
+#SYSTEM_PROMPT = (
+#    "A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant "
+#    "first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning "
+#    "process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., "
+#    "<think> reasoning process here </think><answer> answer here </answer>"
+#)
+
+
+def get_vlm_module(model_name_or_path):
+    if "qwen" in model_name_or_path.lower() or "pixelreasoner" in model_name_or_path.lower():
+        return Qwen2VLModule
+    elif "internvl" in model_name_or_path.lower():
+        return InvernVLModule
+    else:
+        raise ValueError(f"Unsupported model: {model_name_or_path}")
+
+def main(script_args, training_args, model_args):
+    if script_args.logging is True:
+        if script_args.aim_run_hash is None:
+            os.makedirs(training_args.output_dir, exist_ok=True)
+            json.dump(asdict(model_args), open(os.path.join(training_args.output_dir, "model_args.json"), "w"))
+            json.dump(asdict(script_args), open(os.path.join(training_args.output_dir, "script_args.json"), "w"))
+            json.dump(asdict(training_args), open(os.path.join(training_args.output_dir, "training_args.json"), "w"))
+        logger = setup_project_logging(log_file=os.path.join(training_args.output_dir, "log.log"))
+
+
+        logger.info(f"Model args: {model_args}")
+        logger.info(f"Script args: {script_args}")
+        logger.info(f"Training args: {training_args}")
+        aim_callback = [AimCallback(experiment=training_args.run_name)]
+        if script_args.aim_run_hash is not None:
+            aim_callback[0]._run_hash = script_args.aim_run_hash
+    else:
+        aim_callback = None
+        logger = setup_project_logging(log_file=None)
+
+    if script_args.training_mode == "singlenode":
+        logger.info(f"single node training!")
+        vllm_address = None
+    elif script_args.training_mode == "multinode":
+        logger.info(f"multi node training!")
+        info = det.get_cluster_info()
+        container_addrs = info.container_addrs
+        vllm_address = container_addrs[-1]
+        #start_vllm_if_rank0(list(range(script_args.vllm_devices)))
+    else:
+        raise ValueError(f"Unsupported mode: {script_args.training_mode}")
+
+    processor_init_kwargs = {
+        "max_pixels": script_args.max_pixels,
+        "min_pixels": script_args.min_pixels
+    }
+
+    reward_funcs_registry = {
+        "accuracy": {"func": accuracy_reward, "type": "per_completion", "name": "accuracy"},
+        "format": {"func": format_reward, "type": "per_completion", "name": "format"},
+        "format_no_think": {"func": format_reward_only_answer, "type": "per_completion", "name": "format_no_think"},
+        "curiosity": {"func": partial(curiosity_reward,
+                                      pixel_reasoning_threshold=script_args.pixel_reasoning_threshold),
+                      "type": "per_group",
+                      "name": "curiosity"},
+        "pr_penalty": {"func": partial(pr_penalty_reward,
+                                       tool_use_penalty_threshold=script_args.tool_use_penalty_threshold),
+                       "type": "per_group",
+                       "name": "pr_penalty"},
+        "mutual_information": {"func": partial(mutual_information_reward,
+                                               gamma=script_args.mutual_information_clip_value,
+                                               delta=script_args.mutual_information_threshold,
+                                               alpha=script_args.mutual_information_len_exponent,
+                                               length_factor_scaling=script_args.mutual_information_len_scaling if script_args.mutual_information_len_scaling is not None else training_args.max_completion_length,
+                                               tau=script_args.mutual_information_mean_threshold,
+                                               discretize=script_args.mutual_information_discretize,
+                                               q=script_args.mutual_information_quantile,
+                                               ignored_prefix_len=script_args.ignored_prefix_len,
+                                               tanh=script_args.mi_tanh),
+                               "type": "per_completion",
+                               "name": "mutual_information"},
+        "constant_exploration": {"func": constant_exploration,
+                                 "type": "per_group",
+                                 "name":"constant_exploration"}
+    }
+
+    # Load the VLM module
+    vlm_module_cls = get_vlm_module(model_args.model_name_or_path)
+    logger.info(f"using vlm module: {vlm_module_cls.__name__}")
+
+    tool_args = TOOL_CONFIGS[script_args.tool_config if script_args.tool_config is not None else "no_tool"]
+
+    #prompt_type = script_args.prompt_type + "_tool" if script_args.multi_turn == "tool" else script_args.prompt_type
+    #question_prompt = vlm_module_cls.get_question_template(task_type=script_args.prompt_type)
+    question_prompt = get_question_template(task_type=script_args.prompt_type if
+    script_args.prompt_type is not None else tool_args["prompt_type"]).replace("{tool_name}", tool_args["tool_name"])
+
+
+    #reward_funcs = script_args.reward_funcs
+    #if script_args.prompt_type == "no_think":
+    #    reward_funcs.append("no_think")
+    # Get reward functions
+    reward_funcs = [reward_funcs_registry[func] for func in script_args.reward_funcs]
+    assert len(reward_funcs) == len(script_args.reward_func_weights), f"the number of reward functions {reward_funcs} must be equal to the number of reward function weights {script_args.reward_func_weights}"
+    logger.info(f"!!! reward_funcs !!!:\n {reward_funcs} \n!!! reward_funcs !!!")
+
+    dataset_names = script_args.dataset_name.split(":")
+    data_files = script_args.data_file_paths.split(":")
+    image_folders = script_args.image_folders.split(":")
+
+    # reward_method was ..._args.reward_method but it was never used anyway
+    dataset = prepare_data(dataset_names, data_files, image_folders, question_prompt, None)
+
+    # Split dataset for validation if requested
+    splits = {'train': dataset}
+    if script_args.val_split_ratio > 0:
+        train_val_split = dataset.train_test_split(
+            test_size=script_args.val_split_ratio
+        )
+        splits['train'] = train_val_split['train']
+        splits['validation'] = train_val_split['test']
+
+    if training_args.generation_batch_size is None:
+        training_args.generation_batch_size = training_args.per_device_train_batch_size
+
+    # Select trainer class based on vlm_trainer argument
+    if training_args.use_vllm:
+        #trainer_cls = Qwen2VLGRPOVLLMTrainer
+        #trainer_cls = VLMGRPOTrainerVLLM
+        trainer_cls = UpdatedVLMGRPOTrainerVLLM
+        logger.info("Using vllm only works with Qwen 2.5 or 2 as of now!")
+    else:
+        raise NotImplementedError("generation with hf is deprecated, use vllm only")
+    logger.info(f"using trainer: {trainer_cls.__name__}")
+
+    data_subset = script_args.data_subset
+    if not data_subset in [None, "none", "None"]:
+        data_subset = data_subset.split(":")
+        if data_subset[0] == "":
+            left = 0
+        else:
+            left = int(data_subset[0])
+        if data_subset[1] == "":
+            raise ValueError("Right boundary of dataset can not be inferred yet")
+        else:
+            right = int(data_subset[1])
+        logger.info(f"Training from {left} to {right}")
+        data_range = range(left, right)
+    else:
+        data_range = None
+
+    if script_args.chat_template is not None:
+        with open(script_args.chat_template, 'r', encoding='utf-8') as f:
+            chat_template = json.load(f)
+    else:
+        chat_template = None
+
+
+
+    tools = Tool(name=tool_args["tool_name"],
+         description=tool_args["tool_description"],
+         message=Message(tool_args["tool_message_image_pos"],
+                         tool_args["tool_message_text_message"],
+                         tool_args["tool_message_text_fillers"]),
+         parameter_descriptions=tool_args["tool_parameter_descriptions"],
+                 tool_hparams={"max_pixels": script_args.max_pixels,
+                               "min_pixels": script_args.min_pixels})
+
+    if script_args.eps_tool_use_rate_threshold is not None or script_args.eps_exploration_threshold is not None:
+        exploration_pruning_schedule = {"exploration_threshold": script_args.eps_exploration_threshold,
+                                        "tool_use_rate_threshold": script_args.eps_tool_use_rate_threshold}
+    else:
+        exploration_pruning_schedule = None
+
+    # Initialize the GRPO trainer
+    if training_args.use_vllm:
+        if script_args.aim_run_hash is None:
+            os.makedirs(os.path.join(training_args.output_dir, "tool_calls", "generated_images"), exist_ok=True)
+
+        trainer = trainer_cls(
+            model=model_args.model_name_or_path,
+            reward_funcs=reward_funcs,
+            reward_func_weights=script_args.reward_func_weights,
+            args=training_args,
+            vlm_module=vlm_module_cls(),
+            train_dataset=splits['train'].select(data_range) if data_range is not None else splits['train'],
+            eval_dataset=splits.get('validation') if training_args.eval_strategy != "no" else None,
+            peft_config=get_peft_config(model_args),
+            freeze_vision_modules=model_args.freeze_vision_modules,
+            attn_implementation=model_args.attn_implementation,
+            callbacks=aim_callback,
+            multi_turn=script_args.multi_turn,
+            chat_template=chat_template,
+            save_path=training_args.output_dir,
+            max_tool_uses=script_args.max_tool_uses,
+            processor_init_kwargs = processor_init_kwargs,
+            tools = tools,
+            use_global_buffer = script_args.global_buffer,
+            vllm_address = vllm_address,
+            mi_masked_vision_forward_model = script_args.mi_masked_vision_forward_model,
+            mi_full_forward_model = script_args.mi_full_forward_model,
+            mi_mask = script_args.mi_mask,
+            scoring_batch_size_multiplier = script_args.scoring_batch_size_multiplier,
+            exploration_pruning_schedule=exploration_pruning_schedule,
+        )
+    else:
+        trainer = trainer_cls(
+            model=model_args.model_name_or_path,
+            reward_funcs=reward_funcs,
+            args=training_args,
+            vlm_module=vlm_module_cls(),
+            train_dataset=splits['train'].select(data_range) if data_range is not None else splits['train'],
+            eval_dataset=splits.get('validation') if training_args.eval_strategy != "no" else None,
+            peft_config=get_peft_config(model_args),
+            freeze_vision_modules=model_args.freeze_vision_modules,
+            attn_implementation=model_args.attn_implementation,
+            max_pixels=script_args.max_pixels,
+            min_pixels=script_args.min_pixels,
+            callbacks=aim_callback
+        )
+
+    if script_args.aim_run_hash is None:
+        trainer.train()
+    else:
+        trainer.train(resume_from_checkpoint=True)
+
+if __name__ == "__main__":
+    parser = TrlParser((GRPOScriptArguments, GRPOConfig, GRPOModelConfig))
+    script_args, training_args, model_args = parser.parse_args_and_config()
+    main(script_args, training_args, model_args)

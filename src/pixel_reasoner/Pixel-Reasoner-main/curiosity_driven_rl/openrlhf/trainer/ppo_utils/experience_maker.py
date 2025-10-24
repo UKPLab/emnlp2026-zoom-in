@@ -165,8 +165,6 @@ Zoom in on the image based on the bounding box coordinates. It is useful when th
         w, h = cropped_img.size
         assert w > 28 and h > 28, f"Cropped image is too small: {w}x{h}"
 
-
-
         return cropped_img 
     
 

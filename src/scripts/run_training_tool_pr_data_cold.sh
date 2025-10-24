@@ -1,4 +1,4 @@
-run_name="Qwen_2p5_7B_tool_pr_hparams"
+run_name="Qwen_2p5_7B_tool_pr_data_cold"
 
 torchrun --nproc_per_node="7" \
     --nnodes="1" \
@@ -7,9 +7,9 @@ torchrun --nproc_per_node="7" \
     --output_dir /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs/${run_name}_$(date +%Y%m%d_%H%M%S) \
     --model_name_or_path Qwen/Qwen2.5-VL-7B-Instruct \
     --deepspeed /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/scripts/zero3.json \
-    --dataset_name chartqa \
-    --data_file_paths /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train_full/train_augmented_GRPO_format.jsonl \
-    --image_folders /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train_full/png \
+    --dataset_name pixel_reasoner \
+    --data_file_paths /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/pixel_reasoner/RL_data_without_video/train.jsonl \
+    --image_folders /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/pixel_reasoner/RL_data_without_video \
     --max_completion_length 256 \
     --ds3_gather_for_generation True \
     --use_vllm True \
@@ -39,6 +39,7 @@ torchrun --nproc_per_node="7" \
     --learning_rate 1e-6 \
     --lr_scheduler_type cosine \
     --warmup_ratio 0.03 \
-    --max_tool_uses 2
+    --max_tool_uses 2 \
+    --max_pixels 784000 # 1000*28*28
 
 
