@@ -1,5 +1,8 @@
+import traceback
 from typing import Union, Tuple, List, Optional
 
+import numpy as np
+from numpy import array
 import torch
 import json
 import os
@@ -38,7 +41,9 @@ class Turn:
                  token_ids_shorten_image: list[int] = None,
                  image_token_lens: list[int] = None,
                  role: str = None,
-                 image_path: str = None,
+                 image_paths: list[str] = None,
+                 image_grid_thw_list: List[np.array] = None,
+                 pixel_values_list: List[np.array] = None,
                  image_size:Tuple[int, int]=None,
                  attempted_tool_call:bool = None,
                  successful_tool_call:bool = None):
@@ -54,12 +59,16 @@ class Turn:
 
         self.image_token_lens = image_token_lens
 
-        self.image_path = image_path
+        self.image_paths = image_paths
+
+        self.image_grid_thw_list = image_grid_thw_list
+        self.pixel_values_list = pixel_values_list
+
         self.image_size = image_size
         self.attempted_tool_call = attempted_tool_call
         self.successful_tool_call = successful_tool_call
 
-    def wrap(self, type: str) -> Union[str, list[int]]:
+    def wrap(self, type: str, full_image_pad: bool) -> Union[str, list[int]]:
         """ valid types are 'text' and 'id' """
         if type == "text":
             seq = (f"{SPECIAL_TOKENS['turn_start'][type]}"
@@ -73,7 +82,10 @@ class Turn:
             seq.append(SPECIAL_TOKENS['turn_start'][type])
             seq.append(SPECIAL_TOKENS[self.role][type])
             seq.append(SPECIAL_TOKENS['newline'][type])
-            seq += self.token_ids
+            if full_image_pad:
+                seq += self.token_ids
+            else:
+                seq += self.token_ids_shorten_image
 
             if self.role != "assistant":
                 seq.append(SPECIAL_TOKENS['turn_end'][type])
@@ -102,22 +114,34 @@ class Turn:
 
     def __repr__(self):
         full_vars = vars(self)
-        full_vars = {k:v for k,v in full_vars.items() if k != "token_ids"}
-        return json.dumps(full_vars, indent=4)
+        short_vars = {}
+        for k,v in full_vars.items():
+            if k == "token_ids":
+                continue
+            elif k == "image_grid_thw_list":
+                short_vars["image_grid_thw_shapes"] = [x.shape for x in v] if v is not None else None
+            elif k == "pixel_values_list":
+                short_vars["pixel_values_shapes"] = [x.shape for x in v] if v is not None else None
+            else:
+                short_vars[k] = v
+
+        return json.dumps(short_vars, indent=4)
 
     def __str__(self):
         return vars(self)
 
 
 class MultiTurn:
-    def __init__(self, batch_size: int, processor, tools: Optional[Tool]):
+    def __init__(self, batch_size: int, processor, tools: Optional[list[Tool]]):
         self.batch_size = batch_size
         self.processor = processor
         self.tools = tools
 
         self.all_multi_turn:list[list[Turn]] = [[] for _ in range(batch_size)]
 
-    def add_initial_user_prompt(self, prompts:list[dict], image_paths:list[list[str]]):
+        self.is_finished:list[bool] = [False for _ in range(batch_size)]
+
+    def add_initial_user_prompt(self, prompts:list[dict], image_paths:list[str]):
         """
 
         Args:
@@ -134,15 +158,8 @@ class MultiTurn:
         """
 
         system_user_texts = []
-        system_user_image_paths = []
         for idx in range(self.batch_size):
             prompt = prompts[idx]
-            text = None
-            for content in prompt['content']:
-                if content['type'] == 'text':
-                    text = content['text']
-            if text is None:
-                raise ValueError(f'Text content is missing: {prompt}')
 
             logger.info(f"prompt: {repr(prompt)}")
 
@@ -150,7 +167,7 @@ class MultiTurn:
                                       tokenizer=self.processor,
                                       add_generation_prompt=None,
                                       return_assistant_tokens_mask=False,
-                                      tools=self.tools.get_tool_dict() if self.tools is not None else None)["prompt"]
+                                      tools=[tool.get_tool_dict() for tool in self.tools] if self.tools is not None else None)["prompt"]
 
             logger.info(f"wrapped prompt: {repr(wrapped_prompt)}")
             split_prompt = wrapped_prompt.split(SPECIAL_TOKENS["turn_start"]["text"])
@@ -165,62 +182,265 @@ class MultiTurn:
                                                      SPECIAL_TOKENS["turn_separator"]["text"]).removeprefix(SPECIAL_TOKENS["user"]["text"]+
                                                                                                             SPECIAL_TOKENS["newline"]["text"])
             logger.info(f"user_text: {repr(user_text)}")
-            user_turn = Turn(role=prompt["role"], text=user_text)
+            user_turn = Turn(role="user", text=user_text)
 
             system_user_texts.append(system_text)
             system_user_texts.append(user_text)
-            for img_path in image_paths[idx]:
-                system_user_image_paths.append(Image.open(img_path))
+            #for img_path in image_paths[idx]:
+            #    system_user_image_paths.append(Image.open(img_path))
 
             self.all_multi_turn[idx].append(system_turn)
             self.all_multi_turn[idx].append(user_turn)
 
-        input_ids = self.processor(
+        processed = self.processor(
             text=system_user_texts,
-            images=system_user_image_paths,
+            images=[Image.open(image_path) for image_path in image_paths],
             return_tensors=None,
             padding=False,
             add_special_tokens=False,
             return_offsets_mapping=False
-        )["input_ids"]
+        )
 
-        for idx, prompt in enumerate(prompts):
+        input_ids = processed["input_ids"]
+
+        image_grid_thw_list, pixel_values_list = split_image(processed["image_grid_thw"], processed["pixel_values"])
+
+        # we need to make the mapping of the images with the turns, as the input list is flattened
+        img_count_old = 0
+        img_count_new = 0
+        for idx in range(self.batch_size):
             self.all_multi_turn[idx][0].set_token_ids(input_ids[2*idx])
             self.all_multi_turn[idx][1].set_token_ids(input_ids[2*idx+1])
+            img_count_new = img_count_old + len(self.all_multi_turn[idx][1].image_token_lens)
+            self.all_multi_turn[idx][1].image_paths = image_paths[img_count_old:img_count_new]
+            self.all_multi_turn[idx][1].image_grid_thw_list = image_grid_thw_list[img_count_old:img_count_new]
+            self.all_multi_turn[idx][1].pixel_values_list = pixel_values_list[img_count_old:img_count_new]
+            img_count_old = img_count_new
 
-    def add_model_reply(self, token_ids: list[list[int]]):
+    def add_model_reply(self, token_ids: list[list[int]], mapping: list[int] = None):
+        """ the mapping is between the token_id list and the global position in the manager and they should have the same length.
+        Example: [1,2,4] indicates 0->1, 1->2 and 2->4"""
+        if mapping is None:
+            mapping = range(len(token_ids))
+        logger.info(f"in add model reply: mapping: {mapping}")
+        logger.info(f"in add model reply: len token_ids: {len(token_ids)}")
         text_completions = self.processor.batch_decode(token_ids, skip_special_tokens=True)
-        for idx in range(self.batch_size):
+        for idx in range(len(token_ids)):
 
             model_turn = Turn(role="assistant", text=text_completions[idx])
             model_turn.set_token_ids(token_ids[idx])
 
-            self.all_multi_turn[idx].append(model_turn)
+            self.all_multi_turn[mapping[idx]].append(model_turn)
+
+    def get_ids(self, is_finished:bool):
+        filtered_ids = []
+        for idx in range(self.batch_size):
+            if self.is_finished[idx] == is_finished:
+                filtered_ids.append(idx)
+
+        return filtered_ids
+
+    def add_user_message(self, prompts:list[dict], image_paths:list[str], mapping: list[int]=None):
+        logger.info(f"in add user message: prompts: {prompts}, image_paths: {image_paths}")
+
+
+        if mapping is None:
+            mapping = range(len(prompts))
+
+        text_image_prompts = []
+        for idx in range(len(mapping)):
+            prompt = prompts[idx]
+
+            text_image_prompt = ""
+            for prompt_part in prompt["content"]:
+                if prompt_part["type"] == "image":
+                    text_image_prompt += SPECIAL_TOKENS["image_start"]["text"]
+                    text_image_prompt += SPECIAL_TOKENS["image_pad"]["text"]
+                    text_image_prompt += SPECIAL_TOKENS["image_end"]["text"]
+                if prompt_part["type"] == "text":
+                    text_image_prompt += prompt_part["text"]
+
+            text_image_prompts.append(text_image_prompt)
+
+            user_turn = Turn(role="user", text=text_image_prompt)
+            self.all_multi_turn[mapping[idx]].append(user_turn)
+
+
+        processed = self.processor(
+            text=text_image_prompts,
+            images=[Image.open(image_path) for image_path in image_paths] if image_paths is not None else None,
+            return_tensors=None,
+            padding=False,
+            add_special_tokens=False,
+            return_offsets_mapping=False
+        )
+
+        input_ids = processed["input_ids"]
+
+        image_grid_thw_list, pixel_values_list = split_image(processed["image_grid_thw"], processed["pixel_values"])
+
+        # we need to make the mapping of the images with the turns, as the input list is flattened
+        img_count_old = 0
+        img_count_new = 0
+        for idx in range(len(mapping)):
+            self.all_multi_turn[mapping[idx]][-1].set_token_ids(input_ids[idx])
+            img_count_new = img_count_old + len(self.all_multi_turn[mapping[idx]][-1].image_token_lens)
+            self.all_multi_turn[mapping[idx]][-1].image_paths = image_paths[img_count_old:img_count_new]
+            self.all_multi_turn[mapping[idx]][-1].image_grid_thw_list = image_grid_thw_list[img_count_old:img_count_new]
+            self.all_multi_turn[mapping[idx]][-1].pixel_values_list = pixel_values_list[img_count_old:img_count_new]
+            img_count_old = img_count_new
 
 
 
-    def add_tool_execution(self, prompts:list[dict], image_paths:list[list[str]]):
-        pass
+    def get_sequences(self, type:str, add_assistant_start:bool, full_image_pad:bool, ignore_finished:bool=False) -> Union[list[str], list[list[int]]]:
+        """
 
-    def get_sequences(self, type:str) -> Union[list[str], list[int]]:
-        """ valid types are 'text' and 'id' """
+        Args:
+            type: 'text' or 'id'
+            add_assistant_start: if the last turn was from the user, should we start the assistant turn (i.e. append |im_start|assistant\n )
+            full_image_pad: only makes a difference when type= 'id'. Then we return all 1000+ image_pad token ids, instead of only a single placeholder
+            ignore_finished: whether to ignore finished sequences
+
+        Returns:
+
+        """
         seqs = []
         for idx in range(self.batch_size):
-            conv = self.all_multi_turn[idx]
+            if ignore_finished and self.is_finished[idx]:
+                continue
+            conv = self.all_multi_turn[idx].copy()
+            if add_assistant_start and conv[-1].role == "user":
+                conv.append(Turn(role="assistant", text="", token_ids = [], token_ids_shorten_image=[]))
+
             if type == "text":
-                seqs.append(SPECIAL_TOKENS["turn_separator"][type].join([turn.wrap(type) for turn in conv]))
+                seqs.append(SPECIAL_TOKENS["turn_separator"][type].join([turn.wrap(type, full_image_pad=full_image_pad) for turn in conv]))
             elif type == "id":
                 seq = []
                 for conv_idx, turn in enumerate(conv):
-                    seq += turn.wrap(type)
-                    if conv_idx + 2 >= self.batch_size:
+                    seq += turn.wrap(type, full_image_pad=full_image_pad)
+                    if conv_idx + 2 <= len(conv):
                         seq.append(SPECIAL_TOKENS["turn_separator"][type])
+
                 seqs.append(seq)
             else:
                 raise ValueError(f"type {type} not supported, choose from 'id' and 'text'")
 
-
         return seqs
+
+    def get_flattened_image_paths(self) -> list[list[str]]:
+        all_img_paths = []
+        for idx in range(self.batch_size):
+            img_paths = []
+            for turn in self.all_multi_turn[idx]:
+                if turn.image_paths is not None:
+                    img_paths += turn.image_paths
+        return all_img_paths
+
+    def get_image_paths(self, ignore_finished:bool=False, flatten=True) -> Union[list[str], list[list[str]]]:
+        image_paths = []
+        for idx in range(self.batch_size):
+            if ignore_finished and self.is_finished[idx]:
+                continue
+            seq_image_paths = []
+            for turn in self.all_multi_turn[idx]:
+                if turn.image_paths is not None:
+                    seq_image_paths += turn.image_paths
+            if flatten:
+                image_paths += seq_image_paths
+            else:
+                image_paths.append(seq_image_paths)
+
+
+        return image_paths
+
+    def handle_tool_call(self, save_path, step):
+        image_paths = self.get_image_paths(flatten=False)
+        for conv_id, turns in enumerate(self.all_multi_turn):
+            if self.is_finished[conv_id]:
+                continue
+            turn = turns[-1]
+            assert turn.role == "assistant", f"expected turn.role to be 'assistant' but got {turn.role}"
+
+
+            if TOOL_START in turn.text or TOOL_END in turn.text:
+                turn.attempted_tool_call = True
+
+                try:
+                    tool_params = extract_tool(turn.text)
+                    logger.info(f"tool params: {tool_params}")
+                    tool_params["image_paths"] = image_paths[conv_id]
+                    correct_tool_name = False
+                    for tool in self.tools:
+                        if (tool.name == tool_params["name"] or
+                           (tool_params["name"] == "crop_image" and tool.name == "crop_image_normalized")):
+                            correct_tool_name = True
+                            tool_call_result = tool.call_tool(tool_params, save_path)
+
+                            json.dump(
+                                {"original_image_path": tool_call_result["original_image_path"],
+                                "tool_input_image_path": tool_call_result["tool_input_image_path"],
+                                 "tool_name": tool.name,
+                                "tool_input": tool_call_result["tool_input"],
+                                "step": step},
+                                open(os.path.join(save_path, f"{tool_call_result["new_image_id"]}.json"), "w"))
+                            """'content': [
+                            {'type': 'image', 'text': None},
+                            {'type': 'text', 'text': "Hello World"}
+                             ]"""
+                            self.add_user_message(prompts=[{"content": tool_call_result["output_message"],
+                                                            "role": "user"}],
+                                                  image_paths=[tool_call_result["new_image_path"]],
+                                                  mapping=[conv_id])
+                            turn.successful_tool_call = True
+                            #self.add_message(Prompt(content=tool_call_result["output_message"],
+                            #                             role="user", successful_tool_call=True,
+                            #                             image_path=tool_call_result["new_image_path"]),
+                            #                 idx=conv_id)
+                    if not correct_tool_name:
+                        raise ValueError(f"Invalid tool name: {tool_params['name']}")
+
+                except Exception as e:
+                    logger.info(f"Error in tool call: {e}")
+                    self.is_finished[conv_id] = True
+                    turn.successful_tool_call = False
+            else:
+                self.is_finished[conv_id] = True
+
+    def get_no_tool_calls(self, idx):
+        no_tool_calls = 0
+        for turn in self.all_multi_turn[idx]:
+            if turn.successful_tool_call:
+                no_tool_calls += 1
+        return no_tool_calls
+
+    def check(self, all_multimodal_inputs: list[dict], all_multimodal_token_inputs: list[dict],
+              input_text: list[str]):
+        # Sanity check 1: manager_text == handler_text
+        if input_text != [i["prompt"] for i in all_multimodal_inputs]:
+            logger.debug(
+                f"input_text: {input_text} is not equal to ground truth: {[i["prompt"] for i in all_multimodal_inputs]}")
+        else:
+            logger.info(f"manager text is equal to ground truth!")
+
+        full_token_seq = [x["prompt_token_ids"] for x in all_multimodal_token_inputs]
+        # Sanity check 2: tokenized(manager_text) == manager_tokens. Together with 1 this implies manager_tokens == tokenized(handler text)
+        if full_token_seq == [] and input_text == []:
+            logger.info(f"tokenized manager text is equal to ground truth!")
+        else:
+            logger.info(f"in check: input text: {input_text}")
+            tokenized_input_text = self.processor(text=input_text, images=None)["input_ids"]
+            if tokenized_input_text != full_token_seq:
+                logger.debug(f"tokenized input_text: {tokenized_input_text} is not equal to ground truth: {full_token_seq}")
+            else:
+                logger.info(f"tokenized manager text is equal to ground truth!")
+
+        # SAnity check 3: the same image paths are used
+        assert len(all_multimodal_inputs) == len(all_multimodal_token_inputs), f"all_multimodal_inputs={all_multimodal_inputs} != {all_multimodal_token_inputs}=all_multimodal_token_inputs"
+        for idx in range(len(all_multimodal_inputs)):
+
+            if all_multimodal_inputs[idx]["image_path"] != all_multimodal_token_inputs[idx]["image_path"]:
+                logger.debug(f"image paths are different. got: {all_multimodal_token_inputs[idx]["image_path"]} but ground truth is {all_multimodal_inputs[idx]["image_path"]}")
+
 
 
 def remove_image_pad(input_ids: Union[list[list[int]], list[int]], vision_start:int, vision_end:int, vision_pad:int) -> (list[list[int]], list[list[int]]):
@@ -326,6 +546,38 @@ def restore_image_pad(
     if input_was_flat_list:
         restored = restored[0]
     return restored
+
+def split_image(image_grid_thw: np.array, pixel_values: np.array) -> Tuple[List[np.array], List[np.array]]:
+    # Get the grid information to determine split points
+    # image_grid_thw  # Shape: (total_images, 3)
+    # pixel_values   # Shape: (total_patches, channels, patch_height, patch_width)
+
+    # Calculate number of patches per image
+    patches_per_image = (image_grid_thw[:, 1] * image_grid_thw[:, 2]).tolist()
+
+    # Split image_grid_thw (assuming one grid per image in batch)
+    image_grid_thw_split = []
+    start_idx = 0
+    pixel_values_split = []
+    pixel_start_idx = 0
+    for i in range(len(image_grid_thw)):
+        end_idx = start_idx + 1 #int(self.num_images[0, i].item())
+        image_grid_thw_split.append(image_grid_thw[start_idx:end_idx])
+
+        num_patches = sum(patches_per_image[start_idx:end_idx])
+        pixel_end_idx = pixel_start_idx + num_patches
+        pixel_values_split.append(pixel_values[pixel_start_idx:pixel_end_idx])
+        start_idx = end_idx
+        pixel_start_idx = pixel_end_idx
+    return image_grid_thw_split, pixel_values_split
+
+
+
+
+
+
+
+
 
 
 

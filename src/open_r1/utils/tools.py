@@ -264,8 +264,8 @@ class Tool:
         for param_name, param_desc in self.parameter_descriptions.items():
             self.tool_dict["function"]["parameters"]["properties"][param_name]["description"] = param_desc
 
-    def get_tool_dict(self) -> list[dict]:
-        return [self.tool_dict]
+    def get_tool_dict(self) -> dict:
+        return self.tool_dict
 
     def call_tool(self, tool_params: dict, save_path: str = None):
 
