@@ -236,37 +236,82 @@ if __name__ == "__main__":
         {"json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_image_5k_250_exploration_tanh_1_epoch_constant_lr.json",
          "shell_number": 3,
          "path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_image_5k_250_exploration_tanh_1_epoch_constant_lr_20251022_121241",
-         "state": "running"
+         "state": "evaluated"
          },
         {"json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_image_5k_250_only_exploration_tanh_1_epoch.json",
          "shell_number": 5,
          "path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_image_5k_250_only_exploration_tanh_1_epoch_20251022_125452",
-         "state": "running"},
+         "state": "evaluated"},
         {"json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_image_5k_250_tanh_1_epoch_mask_image.json",
          "shell_number": 2,
          "path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_image_5k_250_tanh_1_epoch_mask_image_20251022_135223",
-         "state": "running"},
+         "state": "evaluated"},
         {"json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_image_5k_250_tanh_1_epoch_mask_image_pad.json",
          "shell_number": 4,
          "path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_image_5k_250_tanh_1_epoch_mask_image_pad_20251022_140733",
-         "state": "running"},
+         "state": "evaluated"},
         {"json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
          "shell_number": 1,
          "path": "",
-         "state": "running"},
+         "state": "finished"},
         {"json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_image_5k_250_only_exploration_tanh_1_epoch_exploration_prompt.json",
          "shell_number": 6,
          "path": "",
-         "state": "to_be_launched"},
+         "state": "finished"},
 
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
+            "shell_number": 1,
+            "path": "",
+            "state": "finished"},
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_250.json",
+            "shell_number": 2,
+            "path": "",
+            "state": "finished"},
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_4.json",
+            "shell_number": 3,
+            "path": "",
+            "state": "finished"},
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500.json",
+            "shell_number": 4,# actually runs on 1, but wrongly entered 4
+            "path": "",
+            "state": "to_be_launched"},
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_250.json",
+            "shell_number": 5,
+            "path": "",
+            "state": "finished"},
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_4.json",
+            "shell_number": 6,
+            "path": "",
+            "state": "finished"},
 
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_4_no_tool.json",
+            "shell_number": 1,
+            "path": "",
+            "state": "finished"},
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_250_no_tool.json",
+            "shell_number": 2,
+            "path": "",
+            "state": "finished"},
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool.json",
+            "shell_number": 3,
+            "path": "",
+            "state": "finished"},
 
     ]
 
     for run in runs:
         if run["state"] == "to_be_launched":
-            vllm_screen_name = f"{run['shell_number']}_auto_vllm"
-            train_screen_name = f"{run['shell_number']}_auto_run"
+            vllm_screen_name = f"{run['shell_number']}_auto_vllm_new2"
+            train_screen_name = f"{run['shell_number']}_auto_run_new2"
 
             # Run the training pipeline
             current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")

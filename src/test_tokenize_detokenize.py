@@ -2,8 +2,7 @@ from transformers import AutoProcessor
 from trl.data_utils import maybe_apply_chat_template
 from PIL import Image
 
-class TokenizedPrompt:
-    def __init__(self):
+
 
 
 def get_ids(test:dict):

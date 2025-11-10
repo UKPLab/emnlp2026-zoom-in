@@ -1,7 +1,9 @@
 {
   "train_params": {
-    "output_dir_prefix": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs",
-    "model_name_or_path": "Qwen/Qwen2.5-VL-7B-Instruct",
+    "output_dir": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs/Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_20251031_111228",
+    "resume_from_checkpoint": 764,
+    "aim_run_hash": "726e6f43d8354738bf2386ba",
+    "model_name_or_path": "TIGER-Lab/PixelReasoner-WarmStart",
     "deepspeed": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/scripts/zero3.json",
     "dataset_name": "pixel_reasoner",
     "data_file_paths": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/pixel_reasoner/RL_data_without_video/train.jsonl",

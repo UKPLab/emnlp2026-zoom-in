@@ -54,7 +54,7 @@ from contextlib import nullcontext
 from trl.data_utils import apply_chat_template, is_conversational, maybe_apply_chat_template
 from trl.models import create_reference_model, prepare_deepspeed, unwrap_model_for_generation
 from trl.trainer.grpo_config import GRPOConfig
-from trl.trainer.utils import generate_model_card, get_comet_experiment_url, pad
+from trl.trainer.utils import generate_model_card, get_comet_experiment_url
 from trl import GRPOTrainer
 from trl.extras.vllm_client import VLLMClient
 
@@ -79,6 +79,7 @@ if is_wandb_available():
     import wandb
 
 from open_r1.utils.multi_turn_handler import Prompt, Conversations
+from open_r1.utils.multi_turn_manager import MultiTurn, pad
 from open_r1.utils.masker import Masker
 from open_r1.utils.parser import ParsedTokenized, rescale, reduce_img_per_sample, get_processing
 from open_r1.utils.tools import Tool
@@ -297,7 +298,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         save_path: str = None,
         max_tool_uses: int = None,
         processor_init_kwargs: dict = None,
-        tools: Tool = None,
+        tools: Union[Tool, list[Tool]] = None,
         use_global_buffer: bool = False,
         vllm_address: str = None,
         mi_masked_vision_forward_model: str = None,
@@ -318,7 +319,12 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         self.vlm_module = vlm_module
         self.save_path = save_path
         self.max_tool_uses = max_tool_uses
-        self.tools = tools
+        if tools == []:
+            self.tools = None
+        elif isinstance(tools, Tool):
+            self.tools = [tools]
+        else:
+            self.tools = tools
 
         self.masker = Masker()
 
@@ -897,16 +903,12 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         #added_tool_text = " Please use the tool exactly once during your reasoning."
 
-        #if TOOLS is not None:
-        #    for prompt in prompts[0]:
-        #        for content in prompt["content"]:
-        #            if content["type"] == "text":
-        #                content["text"] += added_tool_text
-
+        tool_dicts = [tool.get_tool_dict() for tool in self.tools] if self.tools is not None else None
+        logger.info(f"in _generate_and_score_completions: tools: {tool_dicts}")
 
         #logger.info(f"prompts: {prompts}")
-        prompts_text = self.vlm_module.prepare_prompt(self.processing_class, inputs,
-                                                      tools=self.tools.get_tool_dict() if self.tools is not None else None)
+        #prompts_text = self.vlm_module.prepare_prompt(self.processing_class, inputs,
+        #                                              tools=tool_dicts)
         #logger.info(f"prompts_text: {prompts_text}")
         #logger.info(f"prompts_text: {prompts_text}")
         # Handle both pre-loaded images and image paths
@@ -932,7 +934,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         # Generate completions using vLLM: gather all prompts and use them in a single call in the main process
         all_histories = gather_object(history)
-        all_prompts_text = gather_object(prompts_text)
+        #all_prompts_text = gather_object(prompts_text)
         all_image_paths = gather_object(image_paths)
 
         if self.accelerator.is_main_process:
@@ -940,33 +942,48 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             # Since 'prompts' contains 'num_generations' duplicates, we first take unique prompts, and generate
             # num_generations outputs for each one. This is faster than generating outputs for each duplicate
             # prompt individually.
-            ordered_set_of_histories = all_histories[:: self.num_generations]
-            ordered_set_of_prompts = all_prompts_text[:: self.num_generations]
+            #ordered_set_of_histories = all_histories[:: self.num_generations]
+            #ordered_set_of_prompts = all_prompts_text[:: self.num_generations]
             ordered_set_of_image_paths = all_image_paths[:: self.num_generations]
-            all_multimodal_inputs = [
-                {"prompt": p, "image_path": i}
-                for p, i in zip(ordered_set_of_prompts, ordered_set_of_image_paths)
-            ]
-            logger.info(f"all multimodal inputs: {all_multimodal_inputs}")
+            #all_multimodal_inputs = [
+            #    {"prompt": p, "image_path": i}
+            #    for p, i in zip(ordered_set_of_prompts, ordered_set_of_image_paths)
+            #]
+            #logger.info(f"all multimodal inputs: {all_multimodal_inputs}")
 
-            no_conversations = len(all_multimodal_inputs) * self.num_generations
+            no_conversations = len(all_histories)
 
-            conversations = Conversations(no_conversations)
+            #conversations = Conversations(no_conversations)
+            multi_turn_manager = MultiTurn(no_conversations,
+                                   processor=self.processing_class,
+                                   tools=self.tools)
 
-            for idx in range(no_conversations):
-                mod_idx = idx // self.num_generations
-                conversations.add_message(
-                    Prompt(pre_tokenizer_format=copy.deepcopy(ordered_set_of_histories[mod_idx]["prompt"][0]),
-                           image_path=ordered_set_of_image_paths[mod_idx]), idx)
+            multi_turn_manager.add_initial_user_prompt([h["prompt"][0] for h in all_histories], all_image_paths)
+            #input_tokens = multi_turn.get_sequences(type="id")
+            full_token_seq = multi_turn_manager.get_sequences(type="id", add_assistant_start=True, full_image_pad=False)[:: self.num_generations]
+            input_text = multi_turn_manager.get_sequences(type="text", add_assistant_start=True, full_image_pad=False)[:: self.num_generations]
+            logger.info(f"input text before generation: {input_text}")
+
+            all_multimodal_token_inputs = [{"prompt_token_ids": full_token_seq[i],
+                                            "image_path": ordered_set_of_image_paths[i]}
+                   for i in range(len(ordered_set_of_image_paths))]
+
+            logger.info(f"all_multimodal_token_inputs: {all_multimodal_token_inputs}")
+
+            #multi_turn_manager.check(all_multimodal_inputs, all_multimodal_token_inputs, input_text)
+
+            #for idx in range(no_conversations):
+            #    mod_idx = idx // self.num_generations
+            #    conversations.add_message(
+            #        Prompt(pre_tokenizer_format=copy.deepcopy(ordered_set_of_histories[mod_idx]["prompt"][0]),
+            #               image_path=ordered_set_of_image_paths[mod_idx]), idx)
 
             conv_round = 0
             max_conv_rounds = 5 # just for safety that we don't get stuck in endless loop. max tool calls should prevent it
 
-
             max_generation_attempts = 5
 
-
-            while not all(conversations.is_finished) and conv_round < max_conv_rounds:
+            while not all(multi_turn_manager.is_finished) and conv_round < max_conv_rounds:
 
                 t_vllm = time.time()
                 with profiling_context(self, "vLLM.generate"):
@@ -974,8 +991,19 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                     attempts = 0
                     while (not vllm_generation_has_worked) and (attempts <= max_generation_attempts):
                         try:
-                            completion_ids = self.vllm_client.generate_from_multimodal_input(
-                                prompts=all_multimodal_inputs,
+                            #completion_ids = self.vllm_client.generate_from_multimodal_input(
+                            #    prompts=all_multimodal_inputs,
+                            #    n=self.num_generations if conv_round == 0 else 1,
+                            #    repetition_penalty=self.repetition_penalty,
+                            #    temperature=self.temperature,
+                            #    top_p=self.top_p,
+                            #    top_k=-1 if self.top_k is None else self.top_k,
+                            #    min_p=0.0 if self.min_p is None else self.min_p,
+                            #    max_tokens=self.max_completion_length,
+                            #    guided_decoding_regex=self.guided_decoding_regex,
+                            #)
+                            completion_ids_token_based = self.vllm_client.generate_from_multimodal_token_input(
+                                prompts=all_multimodal_token_inputs,
                                 n=self.num_generations if conv_round == 0 else 1,
                                 repetition_penalty=self.repetition_penalty,
                                 temperature=self.temperature,
@@ -997,73 +1025,115 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                 t_vllm_end = time.time()
                 self._metrics["vllm_generate_time"].append(t_vllm_end - t_vllm)
                 #logger.info(f"completion_ids: {completion_ids}")
-                completions = self.processing_class.batch_decode(completion_ids, skip_special_tokens=True)
-                logger.info(f"completions from conv round {conv_round}: {completions}")
+                #completions = self.processing_class.batch_decode(completion_ids, skip_special_tokens=True)
+                #logger.info(f"completions from conv round {conv_round}: {completions}")
+                completions_token_based = self.processing_class.batch_decode(completion_ids_token_based, skip_special_tokens=True)
+                logger.info(f"completions from conv round {conv_round}: {completions_token_based}")
 
                 completion_idx = 0
-                for idx in range(no_conversations):
-                    if not conversations.is_finished[idx]:
-                        conversations.add_message(
-                            Prompt(content=[{'text': completions[completion_idx], 'type': 'text'}], role="assistant"), idx)
-                        completion_idx += 1
+                #for idx in range(no_conversations):
+                #    if not conversations.is_finished[idx]:
+                #        conversations.add_message(
+                #            Prompt(content=[{'text': completions[completion_idx], 'type': 'text'}], role="assistant"), idx)
+                #        completion_idx += 1
+
+                multi_turn_manager.add_model_reply(completion_ids_token_based, mapping=multi_turn_manager.get_ids(is_finished=False))
 
                 if self.multi_turn is None:
-                    conversations.is_finished = [True] * no_conversations
+                    #conversations.is_finished = [True] * no_conversations
+                    multi_turn_manager.is_finished = [True for _ in range(no_conversations)]
                 elif self.multi_turn == "text":
                     text_rethink = "Are you sure? Think again. "
                     if conv_round == 0:
-                        for idx in range(no_conversations):
-                            conversations.add_message(Prompt(content=[{'text': text_rethink + format_prompt,
-                                                               'type': 'text'}],
-                                                     role="user"),
-                                              idx)
+                        #for idx in range(no_conversations):
+                        #    conversations.add_message(Prompt(content=[{'text': text_rethink + format_prompt,
+                        #                                       'type': 'text'}],
+                        #                             role="user"),
+                        #                      idx)
+                        multi_turn_manager.add_user_message(texts=[text_rethink + format_prompt for _ in range(no_conversations)])
                     else:
-                        conversations.is_finished = [True] * no_conversations
+                        #conversations.is_finished = [True] * no_conversations
+                        multi_turn_manager.is_finished = [True for _ in range(no_conversations)]
                 elif self.multi_turn == "image":
                     image_rethink = "Are you sure? Look at the image again. "
                     if conv_round == 0:
-                        for idx in range(no_conversations):
-                            conversations.add_message(Prompt(content=[{"text": None, "type": "image"},
-                                                              {'text': image_rethink + format_prompt,
-                                                               'type': 'text'}],
-                                                     role="user",
-                                                     image_path=conversations.get_image_paths()[idx][0]),
-                                              idx)
+                        #for idx in range(no_conversations):
+                        #    conversations.add_message(Prompt(content=[{"text": None, "type": "image"},
+                        #                                      {'text': image_rethink + format_prompt,
+                        #                                       'type': 'text'}],
+                        #                             role="user",
+                        #                             image_path=conversations.get_image_paths()[idx][0]),
+                        #                      idx)
+                        multi_turn_manager.add_user_message(prompts=[{
+                                                            'role': 'user',
+                                                            'content': [
+                                                                {'type': 'image', 'text': None},
+                                                                {'type': 'text', 'text': image_rethink + format_prompt}
+                                                            ]
+                                                            } for _ in range(no_conversations)],
+                                                    image_paths=multi_turn_manager.get_image_paths())
                     else:
-                        conversations.is_finished = [True] * no_conversations
+                        #conversations.is_finished = [True] * no_conversations
+                        multi_turn_manager.is_finished = [True for _ in range(no_conversations)]
                 elif self.multi_turn == "tool":
-                    conversations.handle_tool_call(save_path=os.path.join(self.save_path, "tool_calls"),
-                                                   step=self.state.global_step,
-                                                   tools=self.tools
-                                                   )
+                    #conversations.handle_tool_call(save_path=os.path.join(self.save_path, "tool_calls"),
+                    #                               step=self.state.global_step,
+                    #                               tools=self.tools
+                    #                               )
+                    multi_turn_manager.handle_tool_call(save_path=os.path.join(self.save_path, "tool_calls"),
+                                                   step=self.state.global_step)
+
+                    #for idx in range(no_conversations):
+                    #    if self.max_tool_uses is not None and conversations.get_no_tool_calls(idx) > self.max_tool_uses:
+                    #        conversations.is_finished[idx] = True
 
                     for idx in range(no_conversations):
-                        if self.max_tool_uses is not None and conversations.get_no_tool_calls(idx) > self.max_tool_uses:
-                            conversations.is_finished[idx] = True
+                        if self.max_tool_uses is not None and multi_turn_manager.get_no_tool_calls(idx) > self.max_tool_uses:
+                            multi_turn_manager.is_finished[idx] = True
 
-                full_conversations_concat = self.vlm_module.prepare_prompt(self.processing_class,
-                                                                           conversations.get_full_for_hf_prep(
-                                                                               ignore_finished=True),
-                                                                           tools=self.tools.get_tool_dict() if self.tools is not None else None)
+
+
+                #full_conversations_concat = self.vlm_module.prepare_prompt(self.processing_class,
+                #                                                           conversations.get_full_for_hf_prep(
+                #                                                               ignore_finished=True),
+                #                                                           tools=tool_dicts)
+
+                full_token_seq = multi_turn_manager.get_sequences(type="id", add_assistant_start=True, full_image_pad=False, ignore_finished=True)
+                logger.info(f"full_token_seq: {full_token_seq}")
+                input_text = multi_turn_manager.get_sequences(type="text", add_assistant_start=True, full_image_pad=False, ignore_finished=True)
+                logger.info(f"input_text for conv_round {conv_round}: {input_text}")
+                image_paths = multi_turn_manager.get_image_paths(ignore_finished=True, flatten=False)
+                logger.info(f"image_paths: {image_paths}")
+
+                all_multimodal_token_inputs = [{"prompt_token_ids": full_token_seq[i],
+                                                "image_path": image_paths[i]}
+                                               for i in range(len(image_paths))]
+
                 # logger.info(f"full conversations: {full_conversations_concat}")
-                all_multimodal_inputs = [
-                    {"prompt": p, "image_path": i}
-                    for p, i in zip(full_conversations_concat, conversations.get_image_paths(ignore_finished=True))
-                ]
+                #all_multimodal_inputs = [
+                #    {"prompt": p, "image_path": i}
+                #    for p, i in zip(full_conversations_concat, conversations.get_image_paths(ignore_finished=True))
+                #]
+                #multi_turn_manager.check(all_multimodal_inputs, all_multimodal_token_inputs, input_text)
                 #logger.info(f"all_multimodal_inputs: {all_multimodal_inputs}")
                 conv_round += 1
+                logger.info(f"all_multimodal_token_inputs for conv_round {conv_round}: {all_multimodal_token_inputs}")
 
 
 
-            all_image_paths = conversations.get_image_paths()
-            full_generations = self.vlm_module.prepare_prompt(self.processing_class,
-                                                              conversations.get_full_for_hf_prep(),
-                                                              tools=self.tools.get_tool_dict() if self.tools is not None else None)
-            model_generations = conversations.get_model_generations()
+            #all_image_paths = conversations.get_image_paths()
+            #full_generations = self.vlm_module.prepare_prompt(self.processing_class,
+            #                                                  conversations.get_full_for_hf_prep(),
+            #                                                  tools=tool_dicts)
+            #model_generations = conversations.get_model_generations()
+
+            all_multi_turn = multi_turn_manager.all_multi_turn
 
             #overall_tools_used = np.array([conversations.get_no_tool_calls(idx) for idx in range(no_conversations)])
-            overall_tools_used = [conversations.get_no_tool_calls(idx) for idx in range(no_conversations)]
-            attempted_tool_uses = [conversations.get_attempted_tool_calls(idx) for idx in range(no_conversations)]
+            #overall_tools_used = [conversations.get_no_tool_calls(idx) for idx in range(no_conversations)]
+            overall_tools_used = [multi_turn_manager.get_no_tool_calls(idx) for idx in range(no_conversations)]
+            #attempted_tool_uses = [conversations.get_attempted_tool_calls(idx) for idx in range(no_conversations)]
+            attempted_tool_uses = [multi_turn_manager.get_no_tool_calls(idx, type="attempt") for idx in range(no_conversations)]
             #overall_tools_used = torch.tensor([conversations.get_no_tool_calls(idx) for idx in range(no_conversations)],
             #                                  dtype=torch.float, device=self.accelerator.device)
             logger.info(f"overall_tools_used: {overall_tools_used}")
@@ -1086,11 +1156,12 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             t3 = time.time()
             self._metrics["generate_time"].append(t3 - t2)
         else:
-            full_generations = [None] * len(all_prompts_text)
-            model_generations = [None] * len(all_prompts_text)
+            all_multi_turn = [None] * len(all_histories)
+            #full_generations = [None] * len(all_histories)
+            #model_generations = [None] * len(all_histories)
             #model_generated_boundaries = [None] * len(all_prompts_text)
-            all_image_paths = [None] * len(all_prompts_text)
-            overall_tools_used = [None] * len(all_prompts_text)
+            #all_image_paths = [None] * len(all_histories)
+            overall_tools_used = [None] * len(all_histories)
 
         #logger.info(f"({rank}) Completion ids: {[len(lst) if lst is not None else 0 for lst in completion_ids]}")
         # Broadcast the completions from the main process to all processes, ensuring each process receives its
@@ -1098,14 +1169,15 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         # TODO: is it better to tokenize globally or distributed?
         #logger.info(f"Before full_generations broadcast: {full_generations}")
-        full_generations = broadcast_object_list(full_generations, from_process=0)
+        #full_generations = broadcast_object_list(full_generations, from_process=0)
         #logger.info(f"Before model_generations broadcast: {model_generations}")
-        model_generations = broadcast_object_list(model_generations, from_process=0)
+        #model_generations = broadcast_object_list(model_generations, from_process=0)
         #logger.info(f"Before all_image_paths broadcast: {all_image_paths}")
         all_image_paths = broadcast_object_list(all_image_paths, from_process=0)
         #logger.info(f"Before overall_tools_used broadcast: {overall_tools_used}")
         overall_tools_used = broadcast_object_list(overall_tools_used, from_process=0)
         #logger.info("after broadcast object list")
+        all_multi_turn = broadcast_object_list(all_multi_turn, from_process=0)
 
 
         #logger.info(f"({rank}) Completion ids: {[len(lst) if lst is not None else 0 for lst in completion_ids]}")
@@ -1113,10 +1185,21 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             self.accelerator.process_index * len(prompts),
             (self.accelerator.process_index + 1) * len(prompts),
         )
-        full_generations = full_generations[process_slice]
-        model_generations = model_generations[process_slice]
-        all_image_paths = all_image_paths[process_slice]
-        sliced_tool_use = overall_tools_used[process_slice]
+        #full_generations = full_generations[process_slice]
+        #model_generations = model_generations[process_slice]
+        #all_image_paths = all_image_paths[process_slice]
+        #sliced_tool_use = overall_tools_used[process_slice]
+
+
+        all_multi_turn = all_multi_turn[process_slice]
+        multi_turn_manager = MultiTurn(batch_size=len(all_multi_turn),
+                                       processor=self.processing_class,
+                                       tools=None)
+        multi_turn_manager.all_multi_turn = all_multi_turn
+
+        logger.info(f"multi_turn_manager after split: {multi_turn_manager.all_multi_turn}")
+
+        all_image_paths = multi_turn_manager.get_image_paths(flatten=False)
 
         images = []
         image_paths_flatten = [item for sublist in all_image_paths for item in sublist]
@@ -1124,62 +1207,92 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         #logger.info(f"after image path")
 
-        for image_path in image_paths_flatten:
-            img = PIL.Image.open(image_path)
+        #for image_path in image_paths_flatten:
+        #    img = PIL.Image.open(image_path)
 
-            try:
-                # Ensure minimum dimensions of 28 pixels
-                w, h = img.size
-                if w < 28 or h < 28:
-                # Calculate new dimensions maintaining aspect ratio
-                    if w < h:
-                        new_w = 28
-                        new_h = int(h * (28/w))
-                    else:
-                        new_h = 28
-                        new_w = int(w * (28/h))
-                    img = img.resize((new_w, new_h), PIL.Image.Resampling.LANCZOS)
-            except Exception as e:
-                logger.info(f"Warning: could not process image {image_path}: {e}")
-            images.append(img)
-
-
-        hf_inputs = self.processing_class(
-            text=full_generations.copy(),
-            images=images,
-            return_tensors="pt",
-            padding=True,
-            padding_side="right",
-            add_special_tokens=False,
-            return_offsets_mapping=False
-        )
+        #    try:
+        #        # Ensure minimum dimensions of 28 pixels
+        #        w, h = img.size
+        #        if w < 28 or h < 28:
+        #        # Calculate new dimensions maintaining aspect ratio
+        #            if w < h:
+        #                new_w = 28
+        #                new_h = int(h * (28/w))
+        #            else:
+        #                new_h = 28
+        #                new_w = int(w * (28/h))
+        #            img = img.resize((new_w, new_h), PIL.Image.Resampling.LANCZOS)
+        #    except Exception as e:
+        #        logger.info(f"Warning: could not process image {image_path}: {e}")
+        #    images.append(img)
 
 
-        prompt_inputs = super()._prepare_inputs(hf_inputs)
+        #hf_inputs = self.processing_class(
+        #    text=full_generations.copy(),
+        #    images=images,
+        #    return_tensors="pt",
+        #    padding=True,
+        #    padding_side="right",
+        #    add_special_tokens=False,
+        #    return_offsets_mapping=False
+        #)
 
-        prompt_ids, prompt_mask = prompt_inputs["input_ids"], prompt_inputs["attention_mask"]
+
+        #prompt_inputs = super()._prepare_inputs(hf_inputs)
+
+        #prompt_ids, prompt_mask = prompt_inputs["input_ids"], prompt_inputs["attention_mask"]
 
 
-        initial_mask = torch.ones_like(prompt_mask, device=device, dtype=torch.bool)
+        prompt_ids_new = multi_turn_manager.get_sequences(type="id", add_assistant_start=False, full_image_pad=True)
+        logger.info(f"prompt_ids_new before pad: {[len(s) for s in prompt_ids_new]}")
+        prompt_mask_new = [[1 for _ in seq] for seq in prompt_ids_new]
+        logger.info(f"prompt_mask_new before pad: {[len(s) for s in prompt_mask_new]}")
+        prompt_ids_new = pad(prompt_ids_new, padding_side='right', padding_value=self.processing_class.pad_token_id)
+        logger.info(f"prompt_ids_new after pad: {[len(s) for s in prompt_ids_new]}")
+        prompt_mask_new = pad(prompt_mask_new, padding_side='right', padding_value=0)
+        logger.info(f"prompt_mask_new after pad: {[len(s) for s in prompt_mask_new]}")
+
+
+        pixel_values_new = multi_turn_manager.get_multimodal(type="pixel_values")
+
+        image_grid_thw_new = multi_turn_manager.get_multimodal(type="image_grid_thw")
+
+        prompt_inputs_new = {"input_ids": torch.tensor(prompt_ids_new, dtype=torch.long, device=device),
+                             "attention_mask": torch.tensor(prompt_mask_new, dtype=torch.long, device=device),
+                             "image_grid_thw": torch.tensor(image_grid_thw_new,  dtype=torch.long, device=device),
+                             "pixel_values": torch.tensor(pixel_values_new, dtype=torch.bfloat16, device=device)}
+        prompt_inputs = super()._prepare_inputs(prompt_inputs_new)
+
+        print(f"prompt inputs: {prompt_inputs}")
+
+        prompt_ids = prompt_inputs["input_ids"]
+        prompt_mask = prompt_inputs["attention_mask"]
+
+        #initial_mask = torch.ones_like(prompt_mask, device=device, dtype=torch.bool)
 
         logger.info("before everything_except_model_generation mask")
-        parser_input = hf_inputs.copy()
-        parser = ParsedTokenized(parser_input["input_ids"],
-                                 parser_input["attention_mask"],
-                                 parser_input["image_grid_thw"],
-                                 parser_input["pixel_values"],
-                                 verbose=True)
+        #parser_input = hf_inputs.copy()
+        #parser = ParsedTokenized(parser_input["input_ids"],
+        #                         parser_input["attention_mask"],
+        #                         parser_input["image_grid_thw"],
+        #                         parser_input["pixel_values"],
+        #                         verbose=True)
 
-        logger.info(parser.parsed)
+        #logger.info(parser.parsed)
 
+        non_generation_mask_new = multi_turn_manager.get_mask(type="everything_except_model_generation")
+        logger.info(f"non_generation mask: {[len(s) for s in non_generation_mask_new]}")
+        non_generation_mask_new = pad(non_generation_mask_new, padding_side="right", padding_value=0)
+        logger.info(f"non_generation mask after pad: {[len(s) for s in non_generation_mask_new]}")
 
-        non_generation_mask = parser.get_mask(mode="everything_except_model_generation",
-                               mask=initial_mask,
-                               indices=None)
+        non_generation_mask = torch.tensor(non_generation_mask_new, device=device, dtype=torch.int8)
+
+        #non_generation_mask = parser.get_mask(mode="everything_except_model_generation",
+        #                       mask=initial_mask,
+        #                       indices=None)
+
         if (non_generation_mask.sum(dim=1) == 0).any():
             logger.info(f"non_generation_mask contains row of zeroes!")
-            logger.info(f"input ids: {parser_input["input_ids"]}")
-            logger.info(f"attention mask: {parser_input["attention_mask"]}")
 
         logger.info("after everything_except_model_generation mask")
 
@@ -1224,7 +1337,6 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                         logger.info(f"old_per_token_logps contains nan! {old_per_token_logps}")
                         logger.info(f"prompt_ids: {prompt_ids}")
                         logger.info(f"prompt_mask: {prompt_mask}")
-                        logger.info(f"full_generations: {full_generations}")
                         logger.info(f"images: {images}")
                         sys.exit(1)
 
@@ -1377,6 +1489,10 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         t5 = time.time()
         self._metrics["score_time"].append(t5 - t4)
+
+        model_generations = multi_turn_manager.get_model_generations()
+
+        logger.info(f"model_generations for reward calculation: {model_generations}")
 
         # Decode the generated completions -> skip_special_tokens used to be true, but we have to set it to false, otherwise the im_start and im_end tokens that
         # distinguish the user prompt go away. Update: completions is only used to get the rewards, so im_start and im_end tokens are irrelevant for that.

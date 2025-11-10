@@ -437,15 +437,17 @@ def main(script_args, training_args, model_args):
         chat_template = None
 
 
-
-    tools = Tool(name=tool_args["tool_name"],
-         description=tool_args["tool_description"],
-         message=Message(tool_args["tool_message_image_pos"],
-                         tool_args["tool_message_text_message"],
-                         tool_args["tool_message_text_fillers"]),
-         parameter_descriptions=tool_args["tool_parameter_descriptions"],
-                 tool_hparams={"max_pixels": script_args.max_pixels,
-                               "min_pixels": script_args.min_pixels})
+    if script_args.tool_config != "no_tool":
+        tools = Tool(name=tool_args["tool_name"],
+             description=tool_args["tool_description"],
+             message=Message(tool_args["tool_message_image_pos"],
+                             tool_args["tool_message_text_message"],
+                             tool_args["tool_message_text_fillers"]),
+             parameter_descriptions=tool_args["tool_parameter_descriptions"],
+                     tool_hparams={"max_pixels": script_args.max_pixels,
+                                   "min_pixels": script_args.min_pixels})
+    else:
+        tools = None
 
     if script_args.eps_tool_use_rate_threshold is not None or script_args.eps_exploration_threshold is not None:
         exploration_pruning_schedule = {"exploration_threshold": script_args.eps_exploration_threshold,
