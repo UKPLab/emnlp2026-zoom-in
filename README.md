@@ -16,7 +16,15 @@ trl vllm-serve --model TIGER-Lab/PixelReasoner-WarmStart --limit_image_per_promp
 ```
 trl vllm-serve --model Qwen/Qwen2.5-VL-7B-Instruct --limit_image_per_prompt 3 --max_pixels 3920000 --min_pixels 196000 --enable_prefix_caching True
 ```
-
+## Resume Run
+add
+```
+"output_dir": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs/Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_20251031_111228",
+"resume_from_checkpoint": 382,
+"aim_run_hash": "726e6f43d8354738bf2386ba",
+```
+remove `output_dir_prefix`
+no need to change `model_name_or_path`, this will be automatically changed
 
 max img tokens | generations | iterations | per device bs | num gpus | grad acc | global bs          | steps
 1000           |         8   |        2   | 8             | 7        | 5        |      280=8x7x5     |  1/17.5 = 8x2 / 8x7x5

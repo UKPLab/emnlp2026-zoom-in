@@ -1,6 +1,8 @@
 {
   "train_params": {
-    "output_dir_prefix": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs",
+    "output_dir": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs/Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_4_20251031_131631",
+    "resume_from_checkpoint": 764,
+    "aim_run_hash": "dc3d3d8e6d0e46ae9d2b0170",
     "model_name_or_path": "Qwen/Qwen2.5-VL-7B-Instruct",
     "deepspeed": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/scripts/zero3.json",
     "dataset_name": "pixel_reasoner",
@@ -45,7 +47,7 @@
     "warmup_ratio": 0.03,
     "max_tool_uses": 1,
     "max_pixels": 3920000,
-    "min_pixels": 392000,
+    "min_pixels": 3136,
     "epsilon": 0.2,
     "tool_config": "PR_zoom_in_old",
     "global_buffer": true,

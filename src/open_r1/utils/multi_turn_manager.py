@@ -94,6 +94,27 @@ class Turn:
 
         return seq
 
+    def get_mask(self, type:str) -> list[int]:
+        if type == "everything_except_model_generation":
+            seq = []
+            #seq.append(SPECIAL_TOKENS['turn_start'][type])
+            seq.append(0)
+            #seq.append(SPECIAL_TOKENS[self.role][type])
+            seq.append(0)
+            #seq.append(SPECIAL_TOKENS['newline'][type])
+            seq.append(0)
+            if self.role == "assistant":
+                seq += [1 for _ in self.token_ids]
+            else:
+                seq += [0 for _ in self.token_ids]
+                #seq.append(SPECIAL_TOKENS['turn_end'][type])
+                seq.append(0)
+            return seq
+        else:
+            raise ValueError(f"Invalid type {type}, choose from 'everything_except_model_generation'")
+
+
+
 
     def set_token_ids(self, input_ids: list[int]):
         reduced_input_ids, image_lens = remove_image_pad(input_ids,
@@ -161,7 +182,7 @@ class MultiTurn:
         for idx in range(self.batch_size):
             prompt = prompts[idx]
 
-            logger.info(f"prompt: {repr(prompt)}")
+            #logger.info(f"prompt: {repr(prompt)}")
 
             wrapped_prompt = maybe_apply_chat_template({"prompt": [prompt]},
                                       tokenizer=self.processor,
@@ -169,19 +190,19 @@ class MultiTurn:
                                       return_assistant_tokens_mask=False,
                                       tools=[tool.get_tool_dict() for tool in self.tools] if self.tools is not None else None)["prompt"]
 
-            logger.info(f"wrapped prompt: {repr(wrapped_prompt)}")
+            #logger.info(f"wrapped prompt: {repr(wrapped_prompt)}")
             split_prompt = wrapped_prompt.split(SPECIAL_TOKENS["turn_start"]["text"])
-            logger.info(f"split prompt: {repr(split_prompt)}")
+            #logger.info(f"split prompt: {repr(split_prompt)}")
             system_text = split_prompt[1].removesuffix(SPECIAL_TOKENS["turn_end"]["text"]+
                                                        SPECIAL_TOKENS["turn_separator"]["text"]).removeprefix(SPECIAL_TOKENS["system"]["text"]+
                                                                                                               SPECIAL_TOKENS["newline"]["text"])
-            logger.info(f"system_text: {repr(system_text)}")
+            #logger.info(f"system_text: {repr(system_text)}")
             system_turn = Turn(role="system", text=system_text)
 
             user_text = split_prompt[2].removesuffix(SPECIAL_TOKENS["turn_end"]["text"]+
                                                      SPECIAL_TOKENS["turn_separator"]["text"]).removeprefix(SPECIAL_TOKENS["user"]["text"]+
                                                                                                             SPECIAL_TOKENS["newline"]["text"])
-            logger.info(f"user_text: {repr(user_text)}")
+            #logger.info(f"user_text: {repr(user_text)}")
             user_turn = Turn(role="user", text=user_text)
 
             system_user_texts.append(system_text)
@@ -192,9 +213,28 @@ class MultiTurn:
             self.all_multi_turn[idx].append(system_turn)
             self.all_multi_turn[idx].append(user_turn)
 
+        open_images = []
+        for image_path in image_paths:
+            img = Image.open(image_path)
+            try:
+             # Ensure minimum dimensions of 28 pixels
+                w, h = img.size
+                if w < 28 or h < 28:
+                # Calculate new dimensions maintaining aspect ratio
+                    if w < h:
+                        new_w = 28
+                        new_h = int(h * (28/w))
+                    else:
+                        new_h = 28
+                        new_w = int(w * (28/h))
+                    img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            except Exception as e:
+                    logger.info(f"Warning: could not process image {image_path}: {e}")
+            open_images.append(img)
+
         processed = self.processor(
             text=system_user_texts,
-            images=[Image.open(image_path) for image_path in image_paths],
+            images=open_images,
             return_tensors=None,
             padding=False,
             add_special_tokens=False,
@@ -222,8 +262,8 @@ class MultiTurn:
         Example: [1,2,4] indicates 0->1, 1->2 and 2->4"""
         if mapping is None:
             mapping = range(len(token_ids))
-        logger.info(f"in add model reply: mapping: {mapping}")
-        logger.info(f"in add model reply: len token_ids: {len(token_ids)}")
+        #logger.info(f"in add model reply: mapping: {mapping}")
+        #logger.info(f"in add model reply: len token_ids: {len(token_ids)}")
         text_completions = self.processor.batch_decode(token_ids, skip_special_tokens=True)
         for idx in range(len(token_ids)):
 
@@ -241,7 +281,7 @@ class MultiTurn:
         return filtered_ids
 
     def add_user_message(self, prompts:list[dict], image_paths:list[str], mapping: list[int]=None):
-        logger.info(f"in add user message: prompts: {prompts}, image_paths: {image_paths}")
+        #logger.info(f"in add user message: prompts: {prompts}, image_paths: {image_paths}")
 
 
         if mapping is None:
@@ -406,12 +446,65 @@ class MultiTurn:
             else:
                 self.is_finished[conv_id] = True
 
-    def get_no_tool_calls(self, idx):
+    def get_no_tool_calls(self, idx, type="success") -> int:
         no_tool_calls = 0
         for turn in self.all_multi_turn[idx]:
-            if turn.successful_tool_call:
-                no_tool_calls += 1
+            if type == "success":
+                if turn.successful_tool_call:
+                    no_tool_calls += 1
+            elif type == "attempt":
+                if turn.attempted_tool_call:
+                    no_tool_calls += 1
+            else:
+                raise ValueError(f"Invalid type: {type}. Choose from 'success' or 'attempt'")
         return no_tool_calls
+
+    def get_mask(self, type:str) -> list[list[int]]:
+        seqs = []
+        for idx in range(self.batch_size):
+            conv = self.all_multi_turn[idx]
+
+            if type == "everything_except_model_generation":
+                seq = []
+                for conv_idx, turn in enumerate(conv):
+                    seq += turn.get_mask(type)
+                    #seq += turn.wrap(type, full_image_pad=full_image_pad)
+                    if conv_idx + 2 <= len(conv):
+                        #seq.append(SPECIAL_TOKENS["turn_separator"][type])
+                        seq.append(0)
+                seqs.append(seq)
+            else:
+                raise ValueError(f"type {type} not supported, choose from 'everything_except_model_generation'")
+
+        return seqs
+
+    def get_model_generations(self) -> list[str]:
+        full_model_generations = []
+        for idx in range(self.batch_size):
+            conv = self.all_multi_turn[idx]
+            model_generations = ""
+            for conv_idx, turn in enumerate(conv):
+                if turn.role == "assistant":
+                    model_generations += turn.text
+            full_model_generations.append(model_generations)
+        return full_model_generations
+
+    def get_multimodal(self, type:str) -> np.array:
+        multimodal_list = []
+        for idx in range(self.batch_size):
+            conv = self.all_multi_turn[idx]
+            for conv_idx, turn in enumerate(conv):
+                if type == "image_grid_thw":
+                    if turn.image_grid_thw_list is not None:
+                        multimodal_list += turn.image_grid_thw_list
+                elif type == "pixel_values":
+                    if turn.pixel_values_list is not None:
+                        multimodal_list += turn.pixel_values_list
+                else:
+                    raise ValueError("got type {type}. Choose 'pixel_values' or 'image_grid_thw'")
+
+        return np.concatenate(multimodal_list)
+
 
     def check(self, all_multimodal_inputs: list[dict], all_multimodal_token_inputs: list[dict],
               input_text: list[str]):
@@ -440,7 +533,6 @@ class MultiTurn:
 
             if all_multimodal_inputs[idx]["image_path"] != all_multimodal_token_inputs[idx]["image_path"]:
                 logger.debug(f"image paths are different. got: {all_multimodal_token_inputs[idx]["image_path"]} but ground truth is {all_multimodal_inputs[idx]["image_path"]}")
-
 
 
 def remove_image_pad(input_ids: Union[list[list[int]], list[int]], vision_start:int, vision_end:int, vision_pad:int) -> (list[list[int]], list[list[int]]):
@@ -570,6 +662,20 @@ def split_image(image_grid_thw: np.array, pixel_values: np.array) -> Tuple[List[
         start_idx = end_idx
         pixel_start_idx = pixel_end_idx
     return image_grid_thw_split, pixel_values_split
+
+def pad(unpadded: list[list[int]], padding_side: str, padding_value: int) -> list[list[int]]:
+    padded = []
+    max_len = max([len(seq) for seq in unpadded])
+    for seq in unpadded:
+        if len(seq) < max_len:
+            if padding_side == "right":
+                seq += [padding_value for _ in range(len(seq), max_len)]
+            elif padding_side == "left":
+                seq = [padding_value for _ in range(len(seq), max_len)] + seq
+            else:
+                raise ValueError(f"padding_side={padding_side} is not supported. Choose 'left' or 'right'")
+        padded.append(seq)
+    return padded
 
 
 

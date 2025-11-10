@@ -25,7 +25,7 @@
     "logging": true,
     "num_train_epochs": 3,
     "temperature": 1.0,
-    "multi_turn": "tool",
+    "multi_turn": null,
     "reward_funcs": [
       "accuracy",
       "pr_penalty",
@@ -47,7 +47,7 @@
     "max_pixels": 3920000,
     "min_pixels": 392000,
     "epsilon": 0.2,
-    "tool_config": "PR_zoom_in_old",
+    "tool_config": "no_tool",
     "global_buffer": true,
     "save_strategy": "epoch",
     "save_only_model": false,

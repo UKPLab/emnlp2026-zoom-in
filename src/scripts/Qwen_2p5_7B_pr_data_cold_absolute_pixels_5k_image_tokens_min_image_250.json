@@ -45,7 +45,7 @@
     "warmup_ratio": 0.03,
     "max_tool_uses": 1,
     "max_pixels": 3920000,
-    "min_pixels": 392000,
+    "min_pixels": 196000,
     "epsilon": 0.2,
     "tool_config": "PR_zoom_in_old",
     "global_buffer": true,
