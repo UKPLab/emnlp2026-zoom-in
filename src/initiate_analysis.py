@@ -98,7 +98,8 @@ class SingleEval:
 
 
     def get_command(self, save_path ):
-        cmd = [
+        cmd = []
+        cmd += [
             'python', '-m', 'open_r1.evaluation.evaluate',
             '--model_path', f'{self.model_params.full_model_path}',
             '--model_class', f'{self.model_params.model_class}',
@@ -958,7 +959,7 @@ if __name__ == "__main__":
             "dataset_name": ["pixel_reasoner_vstar"], #["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [250 * 28 * 28],
-            "evaluate": True,
+            "evaluate": False,
             "analyze": False,  # True
             "contains_full_chkp": False,
             "run_finished": True
@@ -973,7 +974,7 @@ if __name__ == "__main__":
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [250 * 28 * 28],
             "evaluate": False,
-            "analyze": True,  # True
+            "analyze": False,  # True
             "contains_full_chkp": True,
             "run_finished": True
         },
@@ -988,7 +989,7 @@ if __name__ == "__main__":
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [250 * 28 * 28],
             "evaluate": False,
-            "analyze": True,  # True
+            "analyze": False,  # True
             "contains_full_chkp": True,
             "run_finished": True
         },
@@ -1003,7 +1004,7 @@ if __name__ == "__main__":
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [250 * 28 * 28],
             "evaluate": False,
-            "analyze": True,  # True
+            "analyze": False,  # True
             "contains_full_chkp": True,
             "run_finished": True
         },
@@ -1016,11 +1017,138 @@ if __name__ == "__main__":
             "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [250 * 28 * 28],
-            "evaluate": True,
+            "evaluate": False,
             "analyze": False,  # True
             "contains_full_chkp": True,
             "run_finished": True
         },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_20251031_103105",
+            "checkpoint": [382, 768, 1146],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["PR_zoom_in_old", "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            "evaluate": False,
+            "analyze": False,  # True
+            "contains_full_chkp": False,
+            "run_finished": True
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_250",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_250_20251031_110627",
+            "checkpoint": [382, 768, 1146],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["PR_zoom_in_old", "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [250 * 28 * 28],
+            "evaluate": False,
+            "analyze": False,  # True
+            "contains_full_chkp": False,
+            "run_finished": True
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_4",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_4_20251031_131631",
+            "checkpoint": [382, 768, 1146],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["PR_zoom_in_old", "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [4 * 28 * 28],
+            "evaluate": False,
+            "analyze": False,  # True
+            "contains_full_chkp": False,
+            "run_finished": True
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500",
+            "model_path": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_20251031_111228",
+            "checkpoint": [382, 768, 1146],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["PR_zoom_in_old", "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            "evaluate": False,# should stay false
+            "analyze": False,  # True
+            "contains_full_chkp": False,
+            "run_finished": False # last chkp is missing
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_250",
+            "model_path": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_250_20251031_111820",
+            "checkpoint": [382, 768, 1146],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["PR_zoom_in_old", "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [250 * 28 * 28],
+            "evaluate": False,
+            "analyze": False,  # True
+            "contains_full_chkp": False,
+            "run_finished": True
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_4",
+            "model_path": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_4_20251103_112855",
+            "checkpoint": [382, 768, 1146],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["PR_zoom_in_old", "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [4 * 28 * 28],
+            "evaluate": False,
+            "analyze": False,  # True
+            "contains_full_chkp": False,
+            "run_finished": True
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_4_no_tool",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_4_no_tool_20251105_231603",
+            "checkpoint": [382, 768, 1146],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [4 * 28 * 28],
+            "evaluate": False,
+            "analyze": False,  # True
+            "contains_full_chkp": False,
+            "run_finished": True
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_250_no_tool",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_250_no_tool_20251105_232334",
+            "checkpoint": [382, 768, 1146],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [250 * 28 * 28],
+            "evaluate": False,
+            "analyze": False,  # True
+            "contains_full_chkp": False,
+            "run_finished": True
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool_20251105_232404",
+            "checkpoint": [382, 768, 1146],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            "evaluate": True,
+            "analyze": False,  # True
+            "contains_full_chkp": False,
+            "run_finished": True
+        },
+
 
 
     ]

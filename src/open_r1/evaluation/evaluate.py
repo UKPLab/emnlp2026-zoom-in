@@ -21,6 +21,9 @@ from open_r1.utils.prompts import get_question_template
 import psutil
 import gc
 
+from open_r1.utils.multi_turn_manager import MultiTurn, pad
+
+from vllm.inputs import TokensPrompt
 
 # Get logger for this module
 logger = setup_project_logging(log_file=None)
@@ -100,10 +103,16 @@ class VLLM:
                         logger.info(f"Warning: could not process image {img_path}: {e}")
                     img_size.append(img.size)
                     images.append(img)
-                inputs_with_image.append(
-                    {"prompt": entry["prompt"],
-                     "multi_modal_data": {"image": images}
-                     })
+                if "prompt" in entry:
+                    inputs_with_image.append(
+                        {"prompt": entry["prompt"],
+                         "multi_modal_data": {"image": images}
+                         })
+                elif "prompt_token_ids" in entry:
+                    inputs_with_image.append(
+                        TokensPrompt(prompt_token_ids=entry["prompt_token_ids"],
+                                     multi_modal_data={"image": images})
+                    )
                 img_sizes.append(img_size)
 
             logger.info(f"directly before vllm generate")
@@ -113,6 +122,7 @@ class VLLM:
             #logger.info(f"{all_outputs[0].outputs[0].text}")
             only_text = [output.outputs[0].text for output in all_outputs]
             completion_len = [len(output.outputs[0].token_ids) for output in all_outputs]
+            only_tokens = [output.outputs[0].token_ids for output in all_outputs]
 
             # Explicit cleanup
             del inputs_with_image
@@ -121,8 +131,10 @@ class VLLM:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-
-            return only_text, img_sizes, completion_len
+            if "prompt" in prompts[0]:
+                return only_text, img_sizes, completion_len
+            elif "prompt_token_ids" in prompts[0]:
+                return only_tokens
 
         finally:
             # Aggressive cleanup in finally block
@@ -211,27 +223,15 @@ class Evaluator:
             raise NotImplementedError(f"the requested dataset {dataset} is not implemented. Choose from 'pr_train_dataset',"
                                       f" 'pixel_reasoner_vstar', 'pixel_reasoner_infovqa'.")
 
-
-    def _generate_and_score_completions(self, inputs: list[dict[str, str]], tools:Tool) -> dict[str, list]:
+    def _generate_and_score_completions(self, inputs: list[dict[str, str]], tools:list[Tool]):
         # only used in image and text rethink
         format_prompt = "As before, first output the thinking process in <think> </think> tags and then output the final answer in <answer> </answer> tags."
 
         history = inputs.copy()
 
-        # logger.info(f"inputs: {inputs}")
-
         prompts = [x["prompt"] for x in inputs]
 
-        #logger.info(f"prompts: {prompts}")
-        #logger.info(f"tools.keys: {tools.keys}")
-        #logger.info(f"tools.tool_dict: {tools.tool_dict}")
-
-        tool_list = [tool.get_tool_dict()[0] for tool in tools] if tools is not None else None
-
-        prompts_text = self.vlm_module.prepare_prompt(self, processing_class=self.processing_class, inputs=inputs,
-                                                      tools=tool_list)
-        self.metrics["query"] += prompts_text
-        # logger.info(f"prompts_text: {prompts_text}")
+        tool_list = [tool.get_tool_dict() for tool in tools] if tools is not None else None
 
         # Handle both pre-loaded images and image paths
         image_paths = []
@@ -244,143 +244,153 @@ class Evaluator:
                 raise ValueError(f"sample {x} does not contain any image path")
 
         # Generate completions using vLLM: gather all prompts and use them in a single call in the main process
+        all_histories = history
+        all_image_paths = image_paths
 
+        no_conversations = len(all_histories)
 
+        multi_turn_manager = MultiTurn(no_conversations,
+                                       processor=self.processing_class,
+                                       tools=tools)
 
-        # Since 'prompts' contains 'num_generations' duplicates, we first take unique prompts, and generate
-        # num_generations outputs for each one. This is faster than generating outputs for each duplicate
-        # prompt individually.
+        multi_turn_manager.add_initial_user_prompt([h["prompt"][0] for h in all_histories], all_image_paths)
+        full_token_seq = multi_turn_manager.get_sequences(type="id", add_assistant_start=True,
+                                                          full_image_pad=False)
+        input_text = multi_turn_manager.get_sequences(type="text", add_assistant_start=True, full_image_pad=False)
+        self.metrics["query"] += input_text
 
-        all_multimodal_inputs = [
-            {"prompt": p, "image_path": i}
-            for p, i in zip(prompts_text, image_paths)
-        ]
-        logger.info(f"all multimodal inputs: {all_multimodal_inputs}")
-        logger.info(f"after all multimodal inputs")
+        logger.info(f"input text before generation: {input_text}")
 
-        no_conversations = len(all_multimodal_inputs)
+        all_multimodal_token_inputs = [{"prompt_token_ids": full_token_seq[i],
+                                        "image_path": all_image_paths[i]}
+                                       for i in range(len(all_image_paths))]
 
-        conversations = Conversations(no_conversations)
+        logger.info(f"all_multimodal_token_inputs: {all_multimodal_token_inputs}")
 
-        for idx in range(no_conversations):
-
-            conversations.add_message(Prompt(pre_tokenizer_format=copy.deepcopy(history[idx]["prompt"][0]),
-                                             image_path=image_paths[idx]), idx)
-        logger.info("after conversations init")
 
         conv_round = 0
         max_conv_rounds = 10  # just for safety that we don't get stuck in endless loop. max tool calls should prevent it
 
         max_generation_attempts = 5
 
-        while not all(conversations.is_finished) and conv_round < max_conv_rounds:
+        while not all(multi_turn_manager.is_finished) and conv_round < max_conv_rounds:
             vllm_generation_has_worked = False
             attempts = 0
             while (not vllm_generation_has_worked) and (attempts <= max_generation_attempts):
                 try:
-                    logger.info(f"before vllm generate")
-                    completions, img_sizes, completion_len = self.vllm_client.generate(
-                        prompts=all_multimodal_inputs,
-                        sampling_params=self.sampling_params
-                    )
+                    completion_ids_token_based = self.vllm_client.generate(prompts=all_multimodal_token_inputs,
+                                                                           sampling_params=self.sampling_params)
+                    #completion_ids_token_based = self.vllm_client.generate_from_multimodal_token_input(
+                    #    prompts=all_multimodal_token_inputs,
+                    #    n=self.num_generations if conv_round == 0 else 1,
+                    #    repetition_penalty=self.repetition_penalty,
+                    #    temperature=self.temperature,
+                    #    top_p=self.top_p,
+                    #    top_k=-1 if self.top_k is None else self.top_k,
+                    #    min_p=0.0 if self.min_p is None else self.min_p,
+                    #    max_tokens=self.max_completion_length,
+                    #    guided_decoding_regex=self.guided_decoding_regex,
+                    #)
                     vllm_generation_has_worked = True
                 except Exception as e:
                     logger.info(f"Generation {attempts} failed with exception:", e)
                     attempts += 1
-                    if attempts == max_generation_attempts:
+                    try:
+                        self.vllm_client.check_server(total_timeout=10.0)
+                        logger.info(f"vLLM server is up!")
+                    except ConnectionError:
                         raise ConnectionError("vLLM Server is down, aborting training.")
 
-            completion_idx = 0
-            for idx in range(no_conversations):
-                if not conversations.is_finished[idx]:
-                    conversations.add_message(
-                        Prompt(content=[{'text': completions[completion_idx], 'type': 'text'}], role="assistant",
-                               num_tokens=completion_len[completion_idx]), idx)
-                    conversations.update_image_size(img_sizes[completion_idx], idx)
-                    completion_idx += 1
-            logger.info(f"after updating conversations")
+            completions_token_based = self.processing_class.batch_decode(completion_ids_token_based,skip_special_tokens=True)
+            logger.info(f"completions from conv round {conv_round}: {completions_token_based}")
+
+            multi_turn_manager.add_model_reply(completion_ids_token_based,
+                                               mapping=multi_turn_manager.get_ids(is_finished=False))
+
             if self.multi_turn is None:
-                conversations.is_finished = [True] * no_conversations
+                multi_turn_manager.is_finished = [True for _ in range(no_conversations)]
             elif self.multi_turn == "text":
                 text_rethink = "Are you sure? Think again. "
                 if conv_round == 0:
-                    for idx in range(no_conversations):
-                        conversations.add_message(Prompt(content=[{'text': text_rethink + format_prompt,
-                                                                   'type': 'text'}],
-                                                         role="user"),
-                                                  idx)
+
+                    multi_turn_manager.add_user_message(
+                        texts=[text_rethink + format_prompt for _ in range(no_conversations)])
                 else:
-                    conversations.is_finished = [True] * no_conversations
+                    multi_turn_manager.is_finished = [True for _ in range(no_conversations)]
             elif self.multi_turn == "image":
                 image_rethink = "Are you sure? Look at the image again. "
                 if conv_round == 0:
-                    for idx in range(no_conversations):
-                        conversations.add_message(Prompt(content=[{"text": None, "type": "image"},
-                                                                  {'text': image_rethink + format_prompt,
-                                                                   'type': 'text'}],
-                                                         role="user",
-                                                         image_path=conversations.get_image_paths()[idx][0]),
-                                                  idx)
+
+                    multi_turn_manager.add_user_message(prompts=[{
+                        'role': 'user',
+                        'content': [
+                            {'type': 'image', 'text': None},
+                            {'type': 'text', 'text': image_rethink + format_prompt}
+                        ]
+                    } for _ in range(no_conversations)],
+                        image_paths=multi_turn_manager.get_image_paths())
                 else:
-                    conversations.is_finished = [True] * no_conversations
+                    multi_turn_manager.is_finished = [True for _ in range(no_conversations)]
             elif self.multi_turn == "tool":
-                conversations.handle_tool_call(save_path=os.path.join(self.save_path, "tool_calls"),
-                                               step=0, tools=tools)
+
+                multi_turn_manager.handle_tool_call(save_path=os.path.join(self.save_path, "tool_calls"),
+                                                    step=0)
+
 
                 for idx in range(no_conversations):
-                    if self.max_tool_uses is not None and conversations.get_no_tool_calls(idx) > self.max_tool_uses:
-                        conversations.is_finished[idx] = True
+                    if self.max_tool_uses is not None and multi_turn_manager.get_no_tool_calls(
+                            idx) > self.max_tool_uses:
+                        multi_turn_manager.is_finished[idx] = True
 
-            full_conversations_concat = self.vlm_module.prepare_prompt(self, self.processing_class,
-                                                                       conversations.get_full_for_hf_prep(
-                                                                           ignore_finished=True),
-                                                                       tools=tool_list)
-            all_multimodal_inputs = [
-                {"prompt": p, "image_path": i}
-                for p, i in zip(full_conversations_concat, conversations.get_image_paths(ignore_finished=True))
-            ]
-            logger.info(f"all_multimodal_inputs: {all_multimodal_inputs}")
+
+            full_token_seq = multi_turn_manager.get_sequences(type="id", add_assistant_start=True,
+                                                              full_image_pad=False, ignore_finished=True)
+            logger.info(f"full_token_seq: {full_token_seq}")
+            input_text = multi_turn_manager.get_sequences(type="text", add_assistant_start=True,
+                                                          full_image_pad=False, ignore_finished=True)
+            logger.info(f"input_text for conv_round {conv_round}: {input_text}")
+            image_paths = multi_turn_manager.get_image_paths(ignore_finished=True, flatten=False)
+            logger.info(f"image_paths: {image_paths}")
+
+            all_multimodal_token_inputs = [{"prompt_token_ids": full_token_seq[i],
+                                            "image_path": image_paths[i]}
+                                           for i in range(len(image_paths))]
+
             conv_round += 1
-            #logger.info(f"image sizes: {conversations.get_image_sizes()}")
+            logger.info(f"all_multimodal_token_inputs for conv_round {conv_round}: {all_multimodal_token_inputs}")
 
 
+        overall_tools_used = [multi_turn_manager.get_no_tool_calls(idx) for idx in range(no_conversations)]
 
-        all_image_paths = conversations.get_image_paths()
-        model_generations = conversations.get_model_generations()
-
-
-        overall_tools_used = [conversations.get_no_tool_calls(idx) for idx in range(no_conversations)]
-        attempted_tool_uses = [conversations.get_attempted_tool_calls(idx) for idx in range(no_conversations)]
+        attempted_tool_uses = [multi_turn_manager.get_no_tool_calls(idx, type="attempt") for idx in
+                               range(no_conversations)]
 
         self.metrics["tool_use"] += overall_tools_used
         self.metrics["attempted_tool_use"] += attempted_tool_uses
-        self.metrics["image_sizes"] += conversations.get_image_sizes()
-        self.metrics["completion_len"] += conversations.get_num_tokens()
+        self.metrics["image_sizes"] += multi_turn_manager.get_image_sizes()
+        self.metrics["completion_len"] += multi_turn_manager.get_model_generation_ids(lengths=True, flatten=False)
 
+        logger.info(f"overall_tools_used: {overall_tools_used}")
 
-        # Decode the generated completions -> skip_special_tokens used to be true, but we have to set it to false, otherwise the im_start and im_end tokens that
-        # distinguish the user prompt go away. Update: completions is only used to get the rewards, so im_start and im_end tokens are irrelevant for that.
-        # However, the completion ids contain eos tokens which have to be ignored, because otherwise the format reward is zero.
-        # completions = self.processing_class.batch_decode(completion_ids, skip_special_tokens=True)
+        model_generations = multi_turn_manager.get_model_generations()
+
+        logger.info(f"model_generations for reward calculation: {model_generations}")
+
         completions = model_generations.copy()
+        logger.info(f"number of completions: {len(completions)}")
         # this works as apply_chat_template just appends before and after without realizing that there are multiple turns inside
         if is_conversational(inputs[0]):
             completions = [[{"role": "assistant", "content": completion}] for completion in completions]
 
-        # Compute the rewards
-        # No need to duplicate prompts as we're not generating multiple completions per prompt
-        # overall_tools_used = torch.tensor(overall_tools_used, dtype=torch.float16, device=device)
         reward_kwargs = {"accu_reward_method": [x["accu_reward_method"] for x in inputs]}
         solutions = [x['solution'] for x in inputs]
 
-        #logger.info(f"before accuracy_reward: prompts: {len(prompts)}, completions: {len(completions)}, "
-        #             f"reward_kwargs: {len(reward_kwargs["accu_reward_method"])}, solutions: {len(solutions)}")
-
-        accuracies = accuracy_reward(prompts=prompts, completions=completions, solution = solutions, cutoff = 1.0,
-                                     **reward_kwargs)
+        accuracies = accuracy_reward(prompts=prompts, completions=completions,
+                                             solution = solutions,
+                                             cutoff = 1.0,
+                                             **reward_kwargs)
 
         accuracies = np.array(accuracies)
-        #accuracies = np.where(accuracies < 1.0, 0.0, accuracies)
         self.metrics["accuracy"] += accuracies.tolist()
         self.metrics["model_answer"] += completions
         self.metrics["solution"] += solutions

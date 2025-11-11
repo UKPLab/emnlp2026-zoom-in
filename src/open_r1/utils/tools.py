@@ -6,6 +6,7 @@ from functools import partial
 from qwen_vl_utils import smart_resize
 
 from .logger import get_logger
+from .utils import get_resized_image_scales
 
 # Get logger for this module
 logger = get_logger(__name__)
@@ -288,18 +289,21 @@ class Tool:
         new_image = self.callable_function(**actual_tool_args)
 
         img_x, img_y = new_image.size
-        if self.tool_hparams["min_pixels"] is None and self.tool_hparams["max_pixels"] is None:
-            input_height, input_width = img_y, img_x
-        elif self.tool_hparams["min_pixels"] is None and self.tool_hparams["max_pixels"] is not None:
-            input_height, input_width = smart_resize(height=img_y, width=img_x,
-                                                     max_pixels=self.tool_hparams["max_pixels"])
-        elif self.tool_hparams["min_pixels"] is not None and self.tool_hparams["max_pixels"] is None:
-            input_height, input_width = smart_resize(height=img_y, width=img_x,
-                                                     min_pixels=self.tool_hparams["min_pixels"])
-        elif self.tool_hparams["min_pixels"] is not None and self.tool_hparams["max_pixels"] is not None:
-            input_height, input_width = smart_resize(height=img_y, width=img_x,
-                                                     min_pixels=self.tool_hparams["min_pixels"],
-                                                     max_pixels=self.tool_hparams["max_pixels"])
+
+        input_height, input_width = get_resized_image_scales(img_y, img_x, self.tool_hparams["min_pixels"], self.tool_hparams["max_pixels"])
+
+        #if self.tool_hparams["min_pixels"] is None and self.tool_hparams["max_pixels"] is None:
+        #    input_height, input_width = img_y, img_x
+        #elif self.tool_hparams["min_pixels"] is None and self.tool_hparams["max_pixels"] is not None:
+        #    input_height, input_width = smart_resize(height=img_y, width=img_x,
+        #                                             max_pixels=self.tool_hparams["max_pixels"])
+        #elif self.tool_hparams["min_pixels"] is not None and self.tool_hparams["max_pixels"] is None:
+        #    input_height, input_width = smart_resize(height=img_y, width=img_x,
+        #                                             min_pixels=self.tool_hparams["min_pixels"])
+        #elif self.tool_hparams["min_pixels"] is not None and self.tool_hparams["max_pixels"] is not None:
+        #    input_height, input_width = smart_resize(height=img_y, width=img_x,
+        #                                             min_pixels=self.tool_hparams["min_pixels"],
+        #                                             max_pixels=self.tool_hparams["max_pixels"])
         message_args = tool_args.copy()
         message_args["width"] = input_width
         message_args["height"] = input_height
@@ -348,19 +352,21 @@ def zoom_in(image_path, bbox_2d, padding=(0.1,0.1), min_pixels=None, max_pixels=
     image = Image.open(image_path)
     img_x, img_y = image.size
 
-    # TODO: very unpythonic way, because smart_resize's default value is given by a global variable
-    if min_pixels is None and max_pixels is None:
-        input_height, input_width = img_y, img_x
-    elif min_pixels is None and max_pixels is not None:
-        input_height, input_width = smart_resize(height=img_y, width=img_x,
-                                                 max_pixels=max_pixels)
-    elif min_pixels is not None and max_pixels is None:
-        input_height, input_width = smart_resize(height=img_y, width=img_x,
-                                                 min_pixels=min_pixels)
-    elif min_pixels is not None and max_pixels is not None:
-        input_height, input_width = smart_resize(height=img_y, width=img_x,
-                                                 min_pixels=min_pixels,
-                                                 max_pixels=max_pixels)
+    input_height, input_width = get_resized_image_scales(img_y, img_x, min_pixels, max_pixels)
+
+    ## TODO: very unpythonic way, because smart_resize's default value is given by a global variable
+    #if min_pixels is None and max_pixels is None:
+    #    input_height, input_width = img_y, img_x
+    #elif min_pixels is None and max_pixels is not None:
+    #    input_height, input_width = smart_resize(height=img_y, width=img_x,
+    #                                             max_pixels=max_pixels)
+    #elif min_pixels is not None and max_pixels is None:
+    #    input_height, input_width = smart_resize(height=img_y, width=img_x,
+    #                                             min_pixels=min_pixels)
+    #elif min_pixels is not None and max_pixels is not None:
+    #    input_height, input_width = smart_resize(height=img_y, width=img_x,
+    #                                             min_pixels=min_pixels,
+    #                                             max_pixels=max_pixels)
 
     logger.info(f"original size: {img_x}x{img_y}")
     logger.info(f"small size: {input_width}x{input_height}")
@@ -392,26 +398,28 @@ def zoom_in(image_path, bbox_2d, padding=(0.1,0.1), min_pixels=None, max_pixels=
 
     return cropped_img
 
-def crop_image(image_path, bbox_2d,  padding=0.1, min_pixels=None, max_pixels=None):
+def crop_image(image_path, bbox_2d, padding=0.1, min_pixels=None, max_pixels=None):
     """
     Crop the image based on the bounding box coordinates.
     """
     image = Image.open(image_path)
     img_x, img_y = image.size
 
-    # TODO: very unpythonic way, because smart_resize's default value is given by a global variable
-    if min_pixels is None and max_pixels is None:
-        input_height, input_width = img_y, img_x
-    elif min_pixels is None and max_pixels is not None:
-        input_height, input_width = smart_resize(height=img_y, width=img_x,
-                                                 max_pixels=max_pixels)
-    elif min_pixels is not None and max_pixels is None:
-        input_height, input_width = smart_resize(height=img_y, width=img_x,
-                                                 min_pixels=min_pixels)
-    elif min_pixels is not None and max_pixels is not None:
-        input_height, input_width = smart_resize(height=img_y, width=img_x,
-                                                 min_pixels=min_pixels,
-                                                 max_pixels=max_pixels)
+    input_height, input_width = get_resized_image_scales(img_y, img_x, min_pixels, max_pixels)
+
+    ## TODO: very unpythonic way, because smart_resize's default value is given by a global variable
+    #if min_pixels is None and max_pixels is None:
+    #    input_height, input_width = img_y, img_x
+    #elif min_pixels is None and max_pixels is not None:
+    #    input_height, input_width = smart_resize(height=img_y, width=img_x,
+    #                                             max_pixels=max_pixels)
+    #elif min_pixels is not None and max_pixels is None:
+    #    input_height, input_width = smart_resize(height=img_y, width=img_x,
+    #                                             min_pixels=min_pixels)
+    #elif min_pixels is not None and max_pixels is not None:
+    #    input_height, input_width = smart_resize(height=img_y, width=img_x,
+    #                                             min_pixels=min_pixels,
+    #                                             max_pixels=max_pixels)
 
     if bbox_2d[0] < 1 and bbox_2d[1] < 1 and bbox_2d[2] < 1 and bbox_2d[3] < 1:
         normalized_bbox_2d = (float(bbox_2d[0])-padding,

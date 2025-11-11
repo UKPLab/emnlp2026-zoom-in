@@ -13,6 +13,8 @@ from transformers import AutoProcessor
 from trl.data_utils import maybe_apply_chat_template
 from PIL import Image
 
+from .utils import get_resized_image_scales
+
 # Get logger for this module
 logger = get_logger(__name__)
 
@@ -44,7 +46,7 @@ class Turn:
                  image_paths: list[str] = None,
                  image_grid_thw_list: List[np.array] = None,
                  pixel_values_list: List[np.array] = None,
-                 image_size:Tuple[int, int]=None,
+                 image_sizes:list[Tuple[int, int]]=None,
                  attempted_tool_call:bool = None,
                  successful_tool_call:bool = None):
         self.text = text
@@ -60,11 +62,12 @@ class Turn:
         self.image_token_lens = image_token_lens
 
         self.image_paths = image_paths
+        self.image_sizes = image_sizes
 
         self.image_grid_thw_list = image_grid_thw_list
         self.pixel_values_list = pixel_values_list
 
-        self.image_size = image_size
+
         self.attempted_tool_call = attempted_tool_call
         self.successful_tool_call = successful_tool_call
 
@@ -156,6 +159,9 @@ class MultiTurn:
     def __init__(self, batch_size: int, processor, tools: Optional[list[Tool]]):
         self.batch_size = batch_size
         self.processor = processor
+
+
+
         self.tools = tools
 
         self.all_multi_turn:list[list[Turn]] = [[] for _ in range(batch_size)]
@@ -253,6 +259,14 @@ class MultiTurn:
             self.all_multi_turn[idx][1].set_token_ids(input_ids[2*idx+1])
             img_count_new = img_count_old + len(self.all_multi_turn[idx][1].image_token_lens)
             self.all_multi_turn[idx][1].image_paths = image_paths[img_count_old:img_count_new]
+            img_sizes = []
+            for img in open_images[img_count_old:img_count_new]:
+                w,h = img.size
+                h,w = get_resized_image_scales(h,w,
+                                               self.processor.image_processor.min_pixels,
+                                               self.processor.image_processor.max_pixels)
+                img_sizes.append((w,h))
+            self.all_multi_turn[idx][1].image_sizes = img_sizes.copy()
             self.all_multi_turn[idx][1].image_grid_thw_list = image_grid_thw_list[img_count_old:img_count_new]
             self.all_multi_turn[idx][1].pixel_values_list = pixel_values_list[img_count_old:img_count_new]
             img_count_old = img_count_new
@@ -283,7 +297,6 @@ class MultiTurn:
     def add_user_message(self, prompts:list[dict], image_paths:list[str], mapping: list[int]=None):
         #logger.info(f"in add user message: prompts: {prompts}, image_paths: {image_paths}")
 
-
         if mapping is None:
             mapping = range(len(prompts))
 
@@ -305,10 +318,11 @@ class MultiTurn:
             user_turn = Turn(role="user", text=text_image_prompt)
             self.all_multi_turn[mapping[idx]].append(user_turn)
 
+        open_images = [Image.open(image_path) for image_path in image_paths] if image_paths is not None else None
 
         processed = self.processor(
             text=text_image_prompts,
-            images=[Image.open(image_path) for image_path in image_paths] if image_paths is not None else None,
+            images= open_images,
             return_tensors=None,
             padding=False,
             add_special_tokens=False,
@@ -322,10 +336,19 @@ class MultiTurn:
         # we need to make the mapping of the images with the turns, as the input list is flattened
         img_count_old = 0
         img_count_new = 0
+        # TODO: this fails if the user message does not contain an image path. This should only happen in the think_again text mode
         for idx in range(len(mapping)):
             self.all_multi_turn[mapping[idx]][-1].set_token_ids(input_ids[idx])
             img_count_new = img_count_old + len(self.all_multi_turn[mapping[idx]][-1].image_token_lens)
             self.all_multi_turn[mapping[idx]][-1].image_paths = image_paths[img_count_old:img_count_new]
+            img_sizes = []
+            for img in open_images[img_count_old:img_count_new]:
+                w, h = img.size
+                h, w = get_resized_image_scales(h, w,
+                                                self.processor.image_processor.min_pixels,
+                                                self.processor.image_processor.max_pixels)
+                img_sizes.append((w, h))
+            self.all_multi_turn[mapping[idx]][-1].image_sizes = img_sizes.copy()
             self.all_multi_turn[mapping[idx]][-1].image_grid_thw_list = image_grid_thw_list[img_count_old:img_count_new]
             self.all_multi_turn[mapping[idx]][-1].pixel_values_list = pixel_values_list[img_count_old:img_count_new]
             img_count_old = img_count_new
@@ -393,6 +416,21 @@ class MultiTurn:
 
         return image_paths
 
+    def get_image_sizes(self, flatten=False) -> list[list[tuple[int, int]]]:
+        all_image_sizes = []
+        for idx in range(self.batch_size):
+            image_sizes = []
+            for turn in self.all_multi_turn[idx]:
+                if turn.image_sizes is not None:
+                    image_sizes += turn.image_sizes
+
+            if flatten:
+                all_image_sizes += image_sizes
+            else:
+                all_image_sizes.append(image_sizes)
+
+        return all_image_sizes
+
     def handle_tool_call(self, save_path, step):
         image_paths = self.get_image_paths(flatten=False)
         for conv_id, turns in enumerate(self.all_multi_turn):
@@ -423,10 +461,7 @@ class MultiTurn:
                                 "tool_input": tool_call_result["tool_input"],
                                 "step": step},
                                 open(os.path.join(save_path, f"{tool_call_result["new_image_id"]}.json"), "w"))
-                            """'content': [
-                            {'type': 'image', 'text': None},
-                            {'type': 'text', 'text': "Hello World"}
-                             ]"""
+
                             self.add_user_message(prompts=[{"content": tool_call_result["output_message"],
                                                             "role": "user"}],
                                                   image_paths=[tool_call_result["new_image_path"]],
@@ -487,6 +522,34 @@ class MultiTurn:
                 if turn.role == "assistant":
                     model_generations += turn.text
             full_model_generations.append(model_generations)
+        return full_model_generations
+
+    def get_model_generation_ids(self, lengths: bool, flatten: bool) -> Union[list[int], list[list[int]]]:
+        """
+
+        Returns: if lengths: list of len(token_ids)
+                 else: list of list of token_ids
+
+        """
+        full_model_generations = []
+        for idx in range(self.batch_size):
+            conv = self.all_multi_turn[idx]
+            model_generations = []
+            for conv_idx, turn in enumerate(conv):
+                if turn.role == "assistant":
+                    if flatten:
+                        model_generations += turn.token_ids
+                    else:
+                        model_generations.append(turn.token_ids)
+            if lengths and flatten: # list(int) -> int
+                full_model_generations.append(len(model_generations))
+            if lengths and not flatten: # list(list(int)) -> list(int)
+                full_model_generations.append([len(m) for m in model_generations])
+            if not lengths and flatten: # list(int) -> list(int)
+                full_model_generations.append(model_generations)
+            if not lengths and not flatten: # list(list(int)) -> list(list(int))
+                full_model_generations.append(model_generations)
+
         return full_model_generations
 
     def get_multimodal(self, type:str) -> np.array:
