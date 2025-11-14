@@ -231,10 +231,10 @@ class GRPOScriptArguments(ScriptArguments):
         }
     )
 
-    mi_mask: Optional[str] = field(
+    mi_mode: Optional[str] = field(
         default=None,
         metadata={
-            "help": "which part to mask. look into parser.py for details "
+            "help": "which part to mask and what to contrast for logprob diff. look into multi_turn_manager.py for details "
         }
     )
 
@@ -482,7 +482,7 @@ def main(script_args, training_args, model_args):
             vllm_address = vllm_address,
             mi_masked_vision_forward_model = script_args.mi_masked_vision_forward_model,
             mi_full_forward_model = script_args.mi_full_forward_model,
-            mi_mask = script_args.mi_mask,
+            mi_mode = script_args.mi_mode,
             scoring_batch_size_multiplier = script_args.scoring_batch_size_multiplier,
             exploration_pruning_schedule=exploration_pruning_schedule,
         )

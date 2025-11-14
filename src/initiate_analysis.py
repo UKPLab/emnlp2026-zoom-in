@@ -1073,10 +1073,10 @@ if __name__ == "__main__":
             "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [500 * 28 * 28],
-            "evaluate": True,# should stay false
-            "analyze": False,  # True
+            "evaluate": False,
+            "analyze": True,  # True
             "contains_full_chkp": True,
-            "run_finished": True # last chkp is missing
+            "run_finished": True
         },
         {
             "short_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_250",
@@ -1153,10 +1153,10 @@ if __name__ == "__main__":
 
     ]
 
-    do_eval = True
+    do_eval = False
     batch_eval = True
 
-    do_analysis = False
+    do_analysis = True
     batch_analyze = True
 
     do_metric_comparison = False
@@ -1207,12 +1207,14 @@ if __name__ == "__main__":
 
     if do_analysis:
         metrics = [
+
             "accuracy",
             "avg_pixel_reasoning",
             "pixel_reasoning_distr",
             "avg_first_completion_len",
             "avg_second_completion_len",
             "avg_total_completion_len",
+
             #"image_size_x_performance_correlation",
             "zoom_in_fraction_median",
             #"avg_image_size",
@@ -1239,12 +1241,12 @@ if __name__ == "__main__":
                                           fixed_params={"dataset_name": "pixel_reasoner_vstar",
                                                                                       "max_pixels": 5000*28*28,#1024*16*28*28, #1000*28*28, #1024*16*28*28,# 1024*16*28*28, #,# 1024*16*28*28, #1000*28*28,# 1024*16*28*28,# ,# , #1024*16*28*28,
                                                                                       #"min_pixels": 500 * 28 * 28,
-                                                                                      "tool_config_type": "PR_zoom_in_old"#"no_tool"#"PR_zoom_in_old"#"no_tool"# "no_tool"#"PR_zoom_in_old"#"no_tool",#"PR_zoom_in_old"#"no_tool"## #  #"PR_zoom_in_old"# "no_tool" #"PR_zoom_in_old" #"no_tool" ## #"no_tool", #""#
+                                                                                      "tool_config_type": "PR_zoom_in_old"#"no_tool"#""#"no_tool"# "no_tool"#"PR_zoom_in_old"#"no_tool",#"PR_zoom_in_old"#"no_tool"## #  #"PR_zoom_in_old"# "no_tool" #"PR_zoom_in_old" #"no_tool" ## #"no_tool", #""#
                                                                                   }
                                           )
         pd.set_option('display.max_columns', 10)
         print(df)
-        metrics_to_drop = [m for m in metrics if not(isinstance(m, dict) or m in ["accuracy", "ANLS"])] + ["name"]
+        metrics_to_drop = [m for m in metrics if not(isinstance(m, dict) or m in ["accuracy", "ANLS", "avg_pixel_reasoning", "zoom_in_fraction_median"])] + ["name"]
         print(metrics_to_drop)
         print(df.drop(metrics_to_drop, axis=1).to_csv(sep=",", index=False))
     if PMI_analysis:

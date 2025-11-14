@@ -333,8 +333,11 @@ class Tool:
 
 
 def extract_tool(text:str, tool_start:str = TOOL_START, tool_end:str = TOOL_END):
-    logger.info(f"extract tool: {text.split(tool_start)[-1].split(tool_end)[0]}")
-    return json.loads(text.split(tool_start)[-1].split(tool_end)[0])
+
+    after_last_tool_start = text.split(tool_start)[-1]
+    assert tool_end in after_last_tool_start, "no tool_end present"
+    logger.info(f"extract tool: {after_last_tool_start.split(tool_end)[0]}")
+    return json.loads(after_last_tool_start.split(tool_end)[0])
 
 
 

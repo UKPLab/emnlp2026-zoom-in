@@ -278,12 +278,12 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 4,# actually runs on 1, but wrongly entered 4
             "path": "",
-            "state": "to_be_launched"},
+            "state": "finished"},
         {
             "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_250.json",
-            "shell_number": 5,
+            "shell_number": 1,
             "path": "",
-            "state": "finished"},
+            "state": "running"},
         {
             "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_4.json",
             "shell_number": 6,
@@ -305,6 +305,12 @@ if __name__ == "__main__":
             "shell_number": 3,
             "path": "",
             "state": "finished"},
+
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_250_mi_tool_box.json",
+            "shell_number": 2,
+            "path": "",
+            "state": "to_be_launched"},
 
     ]
 
