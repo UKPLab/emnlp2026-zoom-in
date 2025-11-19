@@ -1,8 +1,6 @@
 {
   "train_params": {
-    "output_dir": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs/Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_20251031_111228",
-    "resume_from_checkpoint": 764,
-    "aim_run_hash": "726e6f43d8354738bf2386ba",
+    "output_dir_prefix": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs",
     "model_name_or_path": "TIGER-Lab/PixelReasoner-WarmStart",
     "deepspeed": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/scripts/zero3.json",
     "dataset_name": "pixel_reasoner",
@@ -45,7 +43,7 @@
     "learning_rate": 1e-6,
     "lr_scheduler_type": "cosine",
     "warmup_ratio": 0.03,
-    "max_tool_uses": 1,
+    "max_tool_uses": 2,
     "max_pixels": 3920000,
     "min_pixels": 392000,
     "epsilon": 0.2,
@@ -61,7 +59,7 @@
     "min_pixels": "infer",
     "max_pixels": "infer",
     "enable_prefix_caching": true,
-    "limit_image_per_prompt": 3
+    "limit_image_per_prompt": 4
   }
 }
 

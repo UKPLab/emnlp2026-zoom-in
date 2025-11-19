@@ -40,9 +40,15 @@ SPECIAL_TOKENS = {
     "backslash": {"id": 1124, "text": "\\"},
     "double_backslash": {"id": 59, "text": "\\\\"},
     "dot_CC": {"id": 382, "text": ".ĊĊ"},
+    "CC": {"id": 4710, "text": "ĠĊĊ"},
+    "C": {"id": 715, "text": "ĠĊ"},
 
     "box": {"id": 79075, "text": "boxed"},
-    "open_curly_bracket": {"id": 90, "text": "{"}
+    "open_curly_bracket": {"id": 90, "text": "{"},
+
+    "the": {"id": 785, "text": "The"},
+    "answer": {"id": 4226, "text": " answer"},
+    "is": {"id": 374, "text": " is"},
 }
 
 class Turn:
@@ -609,6 +615,16 @@ class MultiTurn:
             validity = self.get_shortened_sequence(conv, mode=mode)
             if validity is not None:
                 considered_seqs[idx] = validity
+            else:
+                considered_seqs[idx] = {"contrasted_area": [0,1],
+                                                    "contrasted_area_short": [0,1],
+                                                    "short_sequence": get_sequence(conv, type="id",
+                                                                                   add_assistant_start=False,
+                                                                                   full_image_pad=True),
+                                                    "image_turns": range(len(conv)),
+                                                    "dummy": True}
+
+
 
 
         input_ids = [v["short_sequence"] for v in considered_seqs.values()]
@@ -666,14 +682,23 @@ class MultiTurn:
             # only keep (system, user, model)
             new_conv = new_conv[:3]
             # get rid of tool call and the "." before (if applicable)
-            cutoff_idx = max(tool_start_idx - 1, 0)
+            # cutoff_idx = max(tool_start_idx - 1, 0)
+
+            # get rid of tool call
+            cutoff_idx = max(tool_start_idx, 0)
             new_conv[2].token_ids = conv[2].token_ids[:cutoff_idx]
             # add box
-            new_conv[2].token_ids += [SPECIAL_TOKENS["dot_CC"]["id"],
+            new_conv[2].token_ids += [SPECIAL_TOKENS["CC"]["id"],
+                                      SPECIAL_TOKENS["the"]["id"],
+                                      SPECIAL_TOKENS["answer"]["id"],
+                                      SPECIAL_TOKENS["is"]["id"],
                                       SPECIAL_TOKENS["double_backslash"]["id"],
                                       ]
             # add answer
             new_conv[2].token_ids += conv[4].token_ids[box_idx:]
+
+            logger.info(f"short model generation: {new_conv[2].token_ids}")
+            logger.info(f"contrasted area token ids: {conv[4].token_ids[box_idx+2:]}")
 
             short_sequence = get_sequence(new_conv, type="id", add_assistant_start=False, full_image_pad=True)
             #logger.info(f"short_sequence: {short_sequence}")
@@ -696,7 +721,8 @@ class MultiTurn:
         return {"contrasted_area": contrasted_area,
                 "contrasted_area_short": contrasted_area_short,
                 "short_sequence": short_sequence,
-                "image_turns": [0,1,2]}
+                "image_turns": [0,1,2],
+                "dummy": False}
 
     def check(self, all_multimodal_inputs: list[dict], all_multimodal_token_inputs: list[dict],
               input_text: list[str]):

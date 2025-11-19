@@ -507,7 +507,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         self.use_vllm = args.use_vllm
 
         self.multi_turn = multi_turn
-        if self.multi_turn == "none":
+        if self.multi_turn == "none" or self.multi_turn == "None":
             self.multi_turn = None
 
         # Multi-step
@@ -1032,6 +1032,8 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                     for idx in range(no_conversations):
                         if self.max_tool_uses is not None and multi_turn_manager.get_no_tool_calls(idx) > self.max_tool_uses:
                             multi_turn_manager.is_finished[idx] = True
+                else:
+                    raise ValueError(f"Invalid value for multi_turn: {self.multi_turn}. Choose from None, 'text', 'image', or 'tool'")
 
 
                 full_token_seq = multi_turn_manager.get_sequences(type="id", add_assistant_start=True, full_image_pad=False, ignore_finished=True)
@@ -1255,49 +1257,48 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
                 input_ids_mi, image_positions_mi, reduced_images_per_sample, considered_seqs = multi_turn_manager.get_shortened_sequences(
                     mode=self.mi_mode)
-                # only do the additional forward pass if there was actually a tool use
-                if considered_seqs != {}:
-                    mask_mi = [[1 for _ in seq] for seq in input_ids_mi]
-                    logger.info(f"mask_mi before pad: {[len(s) for s in mask_mi]}")
 
-                    input_ids_mi = pad(input_ids_mi, padding_side='right', padding_value=self.processing_class.pad_token_id)
-                    logger.info(f"prompt_ids_mi after pad: {[len(s) for s in input_ids_mi]}")
+                mask_mi = [[1 for _ in seq] for seq in input_ids_mi]
+                logger.info(f"mask_mi before pad: {[len(s) for s in mask_mi]}")
 
-                    mask_mi = pad(mask_mi, padding_side='right', padding_value=0)
-                    logger.info(f"prompt_mask_new after pad: {[len(s) for s in mask_mi]}")
+                input_ids_mi = pad(input_ids_mi, padding_side='right', padding_value=self.processing_class.pad_token_id)
+                logger.info(f"prompt_ids_mi after pad: {[len(s) for s in input_ids_mi]}")
 
-                    pixel_values_mi = multi_turn_manager.get_multimodal(type="pixel_values", positions=image_positions_mi)
-                    image_grid_thw_mi = multi_turn_manager.get_multimodal(type="image_grid_thw",
-                                                                          positions=image_positions_mi)
+                mask_mi = pad(mask_mi, padding_side='right', padding_value=0)
+                logger.info(f"prompt_mask_new after pad: {[len(s) for s in mask_mi]}")
 
-                    inputs_mi = {"input_ids": torch.tensor(input_ids_mi, dtype=torch.long, device=device),
-                                 "attention_mask": torch.tensor(mask_mi, dtype=torch.long, device=device),
-                                 "image_grid_thw": torch.tensor(image_grid_thw_mi, dtype=torch.long, device=device),
-                                 "pixel_values": torch.tensor(pixel_values_mi, dtype=torch.bfloat16, device=device)}
+                pixel_values_mi = multi_turn_manager.get_multimodal(type="pixel_values", positions=image_positions_mi)
+                image_grid_thw_mi = multi_turn_manager.get_multimodal(type="image_grid_thw",
+                                                                      positions=image_positions_mi)
 
-                    mi_batch_size = self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier
+                inputs_mi = {"input_ids": torch.tensor(input_ids_mi, dtype=torch.long, device=device),
+                             "attention_mask": torch.tensor(mask_mi, dtype=torch.long, device=device),
+                             "image_grid_thw": torch.tensor(image_grid_thw_mi, dtype=torch.long, device=device),
+                             "pixel_values": torch.tensor(pixel_values_mi, dtype=torch.bfloat16, device=device)}
 
-                    if mi_batch_size > len(input_ids_mi):
-                        mi_batch_size = len(input_ids_mi)
-                    else:
-                        while len(input_ids_mi) % mi_batch_size != 0:
-                            mi_batch_size -= 1
+                mi_batch_size = self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier
 
-                    logger.info(f"mi_batch_size: {mi_batch_size}")
+                #if mi_batch_size > len(input_ids_mi):
+                #    mi_batch_size = len(input_ids_mi)
+                #else:
+                #    while len(input_ids_mi) % mi_batch_size != 0:
+                #        mi_batch_size -= 1
 
-                    vision_masked_per_token_logps = self._get_per_token_logps_new(mi_masked_vision_forward_model,
-                                                                                  input_ids=inputs_mi["input_ids"],
-                                                                                  attention_mask = inputs_mi["attention_mask"],
-                                              image_grid_thw=inputs_mi["image_grid_thw"],
-                                              pixel_values=inputs_mi["pixel_values"],
-                                              num_images=reduced_images_per_sample,
-                                              batch_size=mi_batch_size,
-                                              disable_dropout=True)
+                logger.info(f"mi_batch_size: {mi_batch_size}")
+
+                vision_masked_per_token_logps = self._get_per_token_logps_new(mi_masked_vision_forward_model,
+                                                                              input_ids=inputs_mi["input_ids"],
+                                                                              attention_mask = inputs_mi["attention_mask"],
+                                          image_grid_thw=inputs_mi["image_grid_thw"],
+                                          pixel_values=inputs_mi["pixel_values"],
+                                          num_images=reduced_images_per_sample,
+                                          batch_size=mi_batch_size,
+                                          disable_dropout=True)
 
 
-                    logger.info(f"masked_logps: {vision_masked_per_token_logps}")
+                logger.info(f"masked_logps: {vision_masked_per_token_logps}")
 
-                    logger.info(f"old_per_token_logps: {old_per_token_logps}")
+                logger.info(f"old_per_token_logps: {old_per_token_logps}")
 
 
                 if self.mi_full_forward_model == "self":
@@ -1309,7 +1310,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
                 contrast_diff_list = []
                 for idx in range(full_forward_logps.shape[0]):
-                    if idx in considered_seqs.keys():
+                    if not considered_seqs[idx]["dummy"]:
                         contrasted_area = considered_seqs[idx]["contrasted_area"]
                         contrasted_area_short = considered_seqs[idx]["contrasted_area_short"]
 

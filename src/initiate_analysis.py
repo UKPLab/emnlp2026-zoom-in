@@ -1032,7 +1032,7 @@ if __name__ == "__main__":
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [500 * 28 * 28],
             "evaluate": False,
-            "analyze": True,  # True
+            "analyze": False,  # True
             "contains_full_chkp": False,
             "run_finished": True
         },
@@ -1046,7 +1046,7 @@ if __name__ == "__main__":
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [250 * 28 * 28],
             "evaluate": False,
-            "analyze": True,  # True
+            "analyze": False,  # True
             "contains_full_chkp": False,
             "run_finished": True
         },
@@ -1060,7 +1060,7 @@ if __name__ == "__main__":
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [4 * 28 * 28],
             "evaluate": False,
-            "analyze": True,  # True
+            "analyze": False,  # True
             "contains_full_chkp": False,
             "run_finished": True
         },
@@ -1074,7 +1074,7 @@ if __name__ == "__main__":
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [500 * 28 * 28],
             "evaluate": False,
-            "analyze": True,  # True
+            "analyze": False,  # True
             "contains_full_chkp": True,
             "run_finished": True
         },
@@ -1088,7 +1088,7 @@ if __name__ == "__main__":
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [250 * 28 * 28],
             "evaluate": False,
-            "analyze": True,  # True
+            "analyze": False,  # True
             "contains_full_chkp": False,
             "run_finished": True
         },
@@ -1102,7 +1102,7 @@ if __name__ == "__main__":
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [4 * 28 * 28],
             "evaluate": False,
-            "analyze": True,  # True
+            "analyze": False,  # True
             "contains_full_chkp": False,
             "run_finished": True
         },
@@ -1116,7 +1116,7 @@ if __name__ == "__main__":
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [4 * 28 * 28],
             "evaluate": False,
-            "analyze": True,  # True
+            "analyze": False,  # True
             "contains_full_chkp": False,
             "run_finished": True
         },
@@ -1130,13 +1130,27 @@ if __name__ == "__main__":
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [250 * 28 * 28],
             "evaluate": False,
-            "analyze": True,  # True
+            "analyze": False,  # True
             "contains_full_chkp": False,
             "run_finished": True
         },
         {
             "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool",
             "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool_20251105_232404",
+            "checkpoint": [382, 764, 1146],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            "evaluate": False,
+            "analyze": False,  # True
+            "contains_full_chkp": False,
+            "run_finished": True
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool_20251115_012947",
             "checkpoint": [382, 764, 1146],
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
             "tool_config_type": ["no_tool"],
@@ -1238,10 +1252,10 @@ if __name__ == "__main__":
 
 
         df = all_evals.make_results_table(names=order, metrics=metrics,
-                                          fixed_params={"dataset_name": "pixel_reasoner_vstar",
+                                          fixed_params={"dataset_name": "pixel_reasoner_infovqa",
                                                                                       "max_pixels": 5000*28*28,#1024*16*28*28, #1000*28*28, #1024*16*28*28,# 1024*16*28*28, #,# 1024*16*28*28, #1000*28*28,# 1024*16*28*28,# ,# , #1024*16*28*28,
                                                                                       #"min_pixels": 500 * 28 * 28,
-                                                                                      "tool_config_type": "PR_zoom_in_old"#"no_tool"#""#"no_tool"# "no_tool"#"PR_zoom_in_old"#"no_tool",#"PR_zoom_in_old"#"no_tool"## #  #"PR_zoom_in_old"# "no_tool" #"PR_zoom_in_old" #"no_tool" ## #"no_tool", #""#
+                                                                                      "tool_config_type": "no_tool"#"no_tool"#""#"no_tool"# "no_tool"#"PR_zoom_in_old"#"no_tool",#"PR_zoom_in_old"#"no_tool"## #  #"PR_zoom_in_old"# "no_tool" #"PR_zoom_in_old" #"no_tool" ## #"no_tool", #""#
                                                                                   }
                                           )
         pd.set_option('display.max_columns', 10)

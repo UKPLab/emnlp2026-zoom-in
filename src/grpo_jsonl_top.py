@@ -276,6 +276,16 @@ class GRPOScriptArguments(ScriptArguments):
         }
     )
 
+    tool_bbox_type: Optional[str] = field(
+        default='strict',
+        metadata={
+            "help": "the type of bbox coordinates to accept. choose from 'absolute' (int) or 'relative' (float). If None, both are accepted."
+                    "If 'strict', absolute and relative are automatically inferred based on the tool"
+        }
+    )
+
+
+
 
 
 
@@ -445,7 +455,8 @@ def main(script_args, training_args, model_args):
                              tool_args["tool_message_text_fillers"]),
              parameter_descriptions=tool_args["tool_parameter_descriptions"],
                      tool_hparams={"max_pixels": script_args.max_pixels,
-                                   "min_pixels": script_args.min_pixels})
+                                   "min_pixels": script_args.min_pixels,
+                                   "bbox_type": script_args.tool_bbox_type})
     else:
         tools = None
 
