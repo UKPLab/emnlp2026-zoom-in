@@ -1315,7 +1315,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                                           disable_dropout=True, return_entropies=True)
 
                 if self.mi_mode["contrasted_score"] == "entropy":
-                    vision_masked_per_token_score = vision_masked_per_token_entropies
+                    vision_masked_per_token_score = -vision_masked_per_token_entropies
                 elif self.mi_mode["contrasted_score"] == "log_probs":
                     vision_masked_per_token_score = vision_masked_per_token_logps
                 else:
@@ -1324,14 +1324,14 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
                 if self.mi_full_forward_model == "self":
                     if self.mi_mode["contrasted_score"] == "entropy":
-                        full_forward_score = old_per_token_entropies
+                        full_forward_score = -old_per_token_entropies
                     elif self.mi_mode["contrasted_score"] == "log_probs":
                         full_forward_score = old_per_token_logps
                     else:
                         raise ValueError(f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. Choose from ['entropy', 'log_probs']")
                 elif self.mi_full_forward_model == "reference":
                     if self.mi_mode["contrasted_score"] == "entropy":
-                        full_forward_score = ref_per_token_entropies
+                        full_forward_score = -ref_per_token_entropies
                     elif self.mi_mode["contrasted_score"] == "log_probs":
                         full_forward_score = ref_per_token_logps
                     else:
