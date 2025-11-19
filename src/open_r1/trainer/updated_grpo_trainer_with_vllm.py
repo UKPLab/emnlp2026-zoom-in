@@ -281,6 +281,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         model: Union[str, PreTrainedModel],
         reward_funcs: Union[RewardFunc, list[RewardFunc]],
         reward_func_weights: list[float],
+        reward_func_usage: list[str],
         args: GRPOConfig = None,
         vlm_module: VLMBaseModule = None,
         train_dataset: Optional[Union[Dataset, IterableDataset]] = None,
@@ -547,6 +548,12 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         self.reward_func_weights = torch.tensor(reward_func_weights, dtype=torch.float16,
                                                 device=self.accelerator.device)
+        self.reward_funcs_for_reward = torch.zeros_like(self.reward_func_weights)
+        self.reward_funcs_for_reward[[idx for idx, usage in enumerate(reward_func_usage) if
+                                        usage in ["both", "reward"]]] = 1
+        self.reward_funcs_for_sampling_weights = torch.zeros_like(self.reward_func_weights)
+        self.reward_funcs_for_sampling_weights[[idx for idx, usage in enumerate(reward_func_usage) if
+                                      usage in ["both", "sampling_weights"]]] = 1
 
         # Check if the per_device_train/eval_batch_size * num processes can be divided by the number of generations
         num_processes = self.accelerator.num_processes
@@ -716,18 +723,12 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         generate_every = self.args.steps_per_generation * self.num_iterations
         logger.info(f"generate_every: {generate_every}")
         logger.info(f"self._step: {self._step}")
-        #logger.info(f"in prepare inputs: generation_batch: {}")
         if self._step % generate_every == 0 or self.buffer.buffer_space_taken() == 0:
             # self._buffered_inputs=None can occur when resuming from a checkpoint
             generation_batch = self._generate_and_score_completions(generation_batch, self.model)
             logger.info(f"generation_batch after generate: {generation_batch['prompt_ids'].shape}")
-            #self.monitor_gpu_usage("prepare inputs: after generation")
             self.buffer.add(generation_batch, padding_side="right")
-            #self.monitor_gpu_usage("prepare inputs: after add to buffer")
-            #generation_batch = split_pixel_values_by_grid(generation_batch)
-            #generation_batch = shuffle_sequence_dict(generation_batch)
-            #generation_batches = split_tensor_dict(generation_batch, self.args.steps_per_generation)
-            # self._buffered_inputs = [unsplit_pixel_values_by_grid(batch) for batch in generation_batches]
+
         inputs = self.buffer.get(batch_size=self.args.per_device_train_batch_size, deterministic=False,
                                  device=self.accelerator.device if self.buffer.cpu_buffer else None,
                                  padding_side="right")
@@ -1419,8 +1420,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                         # No need to duplicate prompts as we're not generating multiple completions per prompt
                         # reward_kwargs[key].extend([example[key]] * self.num_generations)
                         reward_kwargs[key].extend([example[key]])
-                #logger.info(f"input to reward func: prompts:  reward_func:={reward_func} prompts={prompts}, completions={completions}")
-                #logger.info(f"reward func: {reward_func}")
+
                 output_reward_func = reward_func(prompts=prompts, completions=completions,
                                                  tool_uses = overall_tools_used,
                                                  group_size = self.num_generations,
@@ -1430,18 +1430,10 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                                                  **reward_kwargs)
                 #logger.info(f"output_reward_func: {output_reward_func}")
                 completion_rewards_per_func[:, i] = torch.tensor(output_reward_func, dtype=torch.float32, device=device)
-        #logger.info(f"rewards per func: {rewards_per_func}")
-        #logger.info("after rewards")
-        #logger.info(f"before gather rewards_per_func: {completion_rewards_per_func}")
-        #logger.info("after rewards calculation")
-        #logger.info(f"Before completion_rewards_per_func gather: {completion_rewards_per_func}")
-        #logger.info(f"Before completion_rewards_per_func gather: {completion_rewards_per_func.shape}")
+
         # Gather rewards across processes
         completion_rewards_per_func = self.accelerator.gather(completion_rewards_per_func)
-        #logger.info(f"After completion_rewards_per_func gather")
-        #logger.info(f"after gather rewards_per_func: {completion_rewards_per_func}")
-        #logger.info(f"after gather rewards_per_func: {completion_rewards_per_func.shape}")
-        #logger.info("after gather rewards")
+
         # note that overall_tools_used is global, whereas prompts and completions are local, so group rewards should
         # not use prompts or completions directly
         group_rewards_per_func = torch.zeros(len(overall_tools_used), len(self.reward_funcs_per_group), device=device)
@@ -1468,6 +1460,8 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             if self.exploration_count < self.exploration_pruning_schedule["exploration_threshold"]:
                 # TODO: Make this pretty!
                 rewards = (rewards_per_func * self.reward_func_weights.unsqueeze(0)).sum(dim=1)
+                extended_rewards = (rewards_per_func * self.reward_func_weights.unsqueeze(
+                    0) * self.reward_funcs_for_sampling_weights.unsqueeze(0)).sum(dim=1)
                 #rewards = rewards_per_func[:, 0] + 0.1
             else:
                 # this assumes that accuracy reward is always the first reward in the list
@@ -1476,22 +1470,27 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             self._metrics["no_tool_correct_rate"].append(no_tool_correct_rate_group_level.detach().cpu().numpy().mean().item())
         else:
             # Sum the rewards from all reward functions
-            rewards = (rewards_per_func * self.reward_func_weights.unsqueeze(0)).sum(dim=1)
-
-        #logger.info(f"after per_group rewards: {rewards_per_func}")
-        #logger.info(f"overall tools used before rewards: {overall_tools_used}")
-        #logger.info(f"rewards: {rewards}")
+            rewards = (rewards_per_func * self.reward_func_weights.unsqueeze(0) * self.reward_funcs_for_reward.unsqueeze(0)).sum(dim=1)
+            extended_rewards = (rewards_per_func * self.reward_func_weights.unsqueeze(0) * self.reward_funcs_for_sampling_weights.unsqueeze(0)).sum(dim=1)
 
         # Compute grouped-wise rewards
         # Each group consists of num_generations completions for the same prompt
         mean_grouped_rewards = rewards.view(-1, self.num_generations).mean(dim=1)
+        extended_mean_grouped_rewards = extended_rewards.view(-1, self.num_generations).mean(dim=1)
+
         #logger.info(f"mean_grouped_rewards: {mean_grouped_rewards}")
         std_grouped_rewards = rewards.view(-1, self.num_generations).std(dim=1)
+        extended_std_grouped_rewards = extended_rewards.view(-1, self.num_generations).std(dim=1)
+
         
         # Normalize the rewards to compute the advantages
         mean_grouped_rewards = mean_grouped_rewards.repeat_interleave(self.num_generations, dim=0)
+        extended_mean_grouped_rewards = extended_mean_grouped_rewards.repeat_interleave(self.num_generations, dim=0)
         std_grouped_rewards = std_grouped_rewards.repeat_interleave(self.num_generations, dim=0)
+        extended_std_grouped_rewards = extended_std_grouped_rewards.repeat_interleave(self.num_generations, dim=0)
         advantages = (rewards - mean_grouped_rewards) / (std_grouped_rewards + 1e-4)
+        sampling_weights = (extended_rewards - extended_mean_grouped_rewards) / (extended_std_grouped_rewards + 1e-4)
+        sampling_weights = torch.abs(sampling_weights)
 
         #logger.info(f"global advantages after scoring: {advantages}")
         
@@ -1501,6 +1500,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             (self.accelerator.process_index + 1) * len(prompts),
         )
         advantages = advantages[process_slice]
+        sampling_weights = sampling_weights[process_slice]
 
         # Log the metrics
         completion_length = self.accelerator.gather_for_metrics(non_generation_mask.sum(1)).float().mean().item()
@@ -1508,13 +1508,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         reward_per_func_full = self.accelerator.gather_for_metrics(rewards_per_func)
         reward_per_func = torch.mean(reward_per_func_full, dim=0)
-        #non_zero_mask = reward_per_func_full != 0
-        #if non_zero_mask.any():
-        #    reward_per_func_nonzero = torch.mean(reward_per_func_full[non_zero_mask], dim=0)
-        #else:
-        #    reward_per_func_nonzero = -1 * torch.ones((1, reward_per_func_full.size(1)),
-        #                                          device=reward_per_func_full.device,
-        #                                          dtype=reward_per_func_full.dtype)
+
 
         for i, reward_func in enumerate(self.reward_funcs):
             if isinstance(reward_func["func"], PreTrainedModel):
@@ -1535,6 +1529,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             "old_per_token_logps": old_per_token_logps,
             "ref_per_token_logps": ref_per_token_logps,
             "advantages": advantages,
+            "sampling_weights": sampling_weights,
             "multimodal_inputs": multimodal_inputs,
             "images_per_sample": images_per_sample,
         }

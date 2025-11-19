@@ -28,7 +28,7 @@ def _gpu_gather_object(object):
 
 class Sample:
     non_multimodal_keys = ["prompt_ids", "prompt_mask", "non_generation_mask", "old_per_token_logps",
-                           "ref_per_token_logps", "advantages"]
+                           "ref_per_token_logps", "advantages", "sampling_weights"]
 
     multimodal_keys = ["num_images", "image_grid_thw", "pixel_values"]
 
@@ -50,6 +50,7 @@ class Sample:
                               "old_per_token_logps": "",
                               "ref_per_token_logps": "",
                               "advantages": "",
+                              "sampling_weights": "",
                               "images_per_sample": "",
                               "multimodal_inputs": {
                                   "image_grid_thw": "",
@@ -57,7 +58,7 @@ class Sample:
                               }}
 
     def __init__(self, prompt_ids, prompt_mask, non_generation_mask, old_per_token_logps,
-                 ref_per_token_logps, advantages, image_grid_thw, pixel_values, images_per_sample=None, num_images=None):
+                 ref_per_token_logps, advantages, image_grid_thw, pixel_values, images_per_sample=None, num_images=None, sampling_weights=None):
 
         self.prompt_ids: torch.tensor = prompt_ids # (num_gen, num_tokens)
         self.prompt_mask: torch.tensor = prompt_mask # (num_gen, num_tokens)
@@ -65,6 +66,10 @@ class Sample:
         self.old_per_token_logps: torch.tensor = old_per_token_logps # (num_gen, num_tokens -1)
         self.ref_per_token_logps: torch.tensor = ref_per_token_logps # (num_gen, num_tokens -1)
         self.advantages: torch.tensor = advantages # (num_gen)
+        if sampling_weights is None:
+            self.sampling_weights: torch.tensor = advantages
+        else:
+            self.sampling_weights: torch.tensor = sampling_weights #(num_gen)
 
         if images_per_sample is None:
             if num_images is None:
@@ -88,6 +93,7 @@ class Sample:
                       old_per_token_logps=item['old_per_token_logps'],
                       ref_per_token_logps=item['ref_per_token_logps'],
                       advantages=item['advantages'],
+                      sampling_weights=item['sampling_weights'],
                       images_per_sample=torch.tensor(item["images_per_sample"], dtype=torch.int,
                                            device=item['prompt_ids'].device).unsqueeze(0),
                       image_grid_thw=item['multimodal_inputs']['image_grid_thw'],
@@ -154,12 +160,6 @@ class Sample:
             for k in Sample.non_multimodal_keys:
                 individual_batch[k] = getattr(self,k)[i:i+1]
 
-                #if k == "advantages":
-                #    logger.info(f"advantages in big split: {getattr(self,k)}")
-                #    logger.info(f"advantages shape in big split: {getattr(self,k)}")
-                #    logger.info(f"advantages in small split: {individual_batch[k]}")
-                #    logger.info(f"advantages shape in small split: {individual_batch[k].shape}")
-
             individual_batches.append(Sample(**individual_batch))
         return individual_batches
 
@@ -174,7 +174,7 @@ class Sample:
         self.prompt_ids = remove_left_padding_seq(self.prompt_ids, padding_id, padding_side)
         if padding_side == "left":
             for k in Sample.non_multimodal_keys:
-                if k in ["prompt_ids", "advantages"]:
+                if k in ["prompt_ids", "advantages", "sampling_weights"]:
                     continue
 
                 if k in ["old_per_token_logps", "ref_per_token_logps"]:
@@ -183,7 +183,7 @@ class Sample:
                     setattr(self, k, getattr(self, k)[:, -self.prompt_ids.shape[1]:])
         elif padding_side == "right":
             for k in Sample.non_multimodal_keys:
-                if k in ["prompt_ids", "advantages"]:
+                if k in ["prompt_ids", "advantages", "sampling_weights"]:
                     continue
 
                 if k in ["old_per_token_logps", "ref_per_token_logps"]:
@@ -257,9 +257,7 @@ class Buffer:
 
 
     def add(self, item, padding_side="left"):
-        #self.display_state("before add", params=["advantages"])
         old_write_position = self.write_position
-        #self.display_state("before split")
         splitted_batch = self.split_multimodal_batch(item)
 
         #logger.info(f"add to buffer:")
@@ -277,19 +275,15 @@ class Buffer:
             self.data[self.write_position] = batch_item
 
             self.write_position += 1
-        #self.display_state("after add", params=["advantages"])
         if self.use_global_buffer:
             self.sync_buffers(old_write_position, self.write_position)
-        #self.display_state("after add global", params=["advantages"])
 
     def get(self, batch_size: int, deterministic=False, device=None, padding_side="left"):
-        #self.display_state("before get", params=["advantages"])
         sampling_source = self.data if not self.use_global_buffer else self.global_buffer
         idxs = self._get_idxs(batch_size, sampling_source, deterministic)
         new_batch = self.combine_multimodal_batches([sampling_source[idx] for idx in idxs], padding_side=padding_side)
 
         batch_dict = new_batch.to_external(["clone", "detach", "contiguous", f"move_to_device:{device}", "detach"])
-        #self.display_state("after get", params=["advantages"])
         return batch_dict
 
     def _get_idxs(self, batch_size: int, sampling_source, deterministic=False) -> list[int]:
@@ -310,18 +304,18 @@ class Buffer:
         if not valid_items:
             raise ValueError("No valid items in buffer.")
 
-        advantages = torch.cat([item.advantages for item in valid_items])
+        sampling_weights = torch.cat([item.sampling_weights for item in valid_items])
 
-        normalized_advantages = torch.abs(advantages) ** self.alpha
-        if torch.sum(normalized_advantages) == 0:
-            logger.info(f"CAUTION, advantages sum is 0, using uniform sampling")
-            normalized_advantages = torch.ones(advantages.shape[0]) / advantages.shape[0]
+        normalized_sampling_weights = sampling_weights ** self.alpha
+        if torch.sum(normalized_sampling_weights) == 0:
+            logger.info(f"CAUTION, sampling_weights sum is 0, using uniform sampling")
+            normalized_sampling_weights = torch.ones(sampling_weights.shape[0]) / sampling_weights.shape[0]
         else:
-            normalized_advantages = normalized_advantages / torch.sum(normalized_advantages)
+            normalized_sampling_weights = normalized_sampling_weights / torch.sum(normalized_sampling_weights)
 
-        logger.info(f"normalized_advantages: {normalized_advantages}")
+        logger.info(f"normalized_sampling_weights: {normalized_sampling_weights}")
         # Use torch.multinomial for sampling
-        sampled_indices = torch.multinomial(normalized_advantages, batch_size,
+        sampled_indices = torch.multinomial(normalized_sampling_weights, batch_size,
                                             replacement=self.sample_with_replacement).tolist()
 
         back_mapped_indices = [valid_items_back_map[idx] for idx in sampled_indices]
@@ -371,7 +365,7 @@ class Buffer:
 
             if k == "prompt_ids":
                 continue
-            elif k == "advantages":
+            elif k == ["advantages", "sampling_weights"]:
                 combined_batch[k] = torch.cat(list_by_key, dim=0)
             else:
                 if k in ["prompt_mask", "non_generation_mask"]:

@@ -67,6 +67,10 @@ class GRPOScriptArguments(ScriptArguments):
         default_factory=lambda: [1.0],
         metadata={"help": "Weights for reward functions. Must have the same length as reward_funcs"},
     )
+    reward_func_usage: list[str] = field(
+        default_factory=lambda: ["both"],
+        metadata={"help": "specifies for each reward function if it should be used for 'reward', 'sampling_weights' or 'both'"}
+    )
     max_pixels: Optional[int] = field(
         default=12845056,
         metadata={"help": "Maximum number of pixels for the image (for QwenVL)"},
@@ -496,6 +500,7 @@ def main(script_args, training_args, model_args):
             model=model_args.model_name_or_path,
             reward_funcs=reward_funcs,
             reward_func_weights=script_args.reward_func_weights,
+            reward_func_usage=script_args.reward_func_usage,
             args=training_args,
             vlm_module=vlm_module_cls(),
             train_dataset=splits['train'].select(data_range) if data_range is not None else splits['train'],
