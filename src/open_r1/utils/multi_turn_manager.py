@@ -8,6 +8,8 @@ import json
 import os
 import copy
 
+from prometheus_client import bridge
+
 from .tools import TOOL_END, TOOL_START, Tool, extract_tool
 from .logger import get_logger
 from transformers import AutoProcessor
@@ -39,7 +41,9 @@ SPECIAL_TOKENS = {
     # from here on, we only use the ID, no guarantee that the text is correct (escaping etc)
     "backslash": {"id": 1124, "text": "\\"},
     "double_backslash": {"id": 59, "text": "\\\\"},
+    # C is newline
     "dot_CC": {"id": 382, "text": ".ĊĊ"},
+    # G is whitespace
     "CC": {"id": 4710, "text": "ĠĊĊ"},
     "C": {"id": 715, "text": "ĠĊ"},
 
@@ -602,7 +606,7 @@ class MultiTurn:
 
         return np.concatenate(multimodal_list)
 
-    def get_shortened_sequences(self, mode:str):
+    def get_shortened_sequences(self, remove:str, contrasted_area:str, bridge:str):
         """
         returns
         inputs: list[str] ,
@@ -612,7 +616,7 @@ class MultiTurn:
         considered_seqs = {}
         for idx in range(self.batch_size):
             conv = self.all_multi_turn[idx]
-            validity = self.get_shortened_sequence(conv, mode=mode)
+            validity = self.get_shortened_sequence(conv, remove=remove, contrasted_area_name=contrasted_area, bridge=bridge)
             if validity is not None:
                 considered_seqs[idx] = validity
             else:
@@ -643,8 +647,8 @@ class MultiTurn:
 
 
 
-    def get_shortened_sequence(self, conv: list[Turn], mode:str) -> Optional[dict]:
-        if mode == "tool_and_box":
+    def get_shortened_sequence(self, conv: list[Turn], remove:str, contrasted_area_name: str, bridge: str) -> Optional[dict]:
+        if remove == "tool_to_box":
             # system, user, model, tool_exec, model
 
             # the end of the reasoning chain usually looks like this:
@@ -687,28 +691,50 @@ class MultiTurn:
             # get rid of tool call
             cutoff_idx = max(tool_start_idx, 0)
             new_conv[2].token_ids = conv[2].token_ids[:cutoff_idx]
-            # add box
-            new_conv[2].token_ids += [SPECIAL_TOKENS["CC"]["id"],
-                                      SPECIAL_TOKENS["the"]["id"],
-                                      SPECIAL_TOKENS["answer"]["id"],
-                                      SPECIAL_TOKENS["is"]["id"],
-                                      SPECIAL_TOKENS["double_backslash"]["id"],
-                                      ]
+
+            # between M_1^R and boxed{
+            if bridge is None:
+                new_conv[2].token_ids += [SPECIAL_TOKENS["backslash"]["id"]]
+            elif bridge == "double_newline":
+                new_conv[2].token_ids += [SPECIAL_TOKENS["CC"]["id"],
+                                          SPECIAL_TOKENS["backslash"]["id"],
+                                          ]
+            elif bridge == "double_newline,the,answer,is":
+                new_conv[2].token_ids += [SPECIAL_TOKENS["CC"]["id"],
+                                          SPECIAL_TOKENS["the"]["id"],
+                                          SPECIAL_TOKENS["answer"]["id"],
+                                          SPECIAL_TOKENS["is"]["id"],
+                                          SPECIAL_TOKENS["backslash"]["id"],
+                                          ]
+            else:
+                raise ValueError(f"bridge: {bridge} is unsupported. Choose from 'double_newline', 'double_newline,the,answer,is' or None")
+
             # add answer
             new_conv[2].token_ids += conv[4].token_ids[box_idx:]
 
+            # indices are relative and from the right
+            if contrasted_area_name == "first_box_entry_to_end":
+                contrasted_area_begin = len(conv[4].token_ids[box_idx+2:])
+                contrasted_area_end = 0
+            elif contrasted_area_name == "first_box_entry":
+                contrasted_area_begin = len(conv[4].token_ids[box_idx + 2:])
+                contrasted_area_end = contrasted_area_begin + 1
+            else:
+                raise ValueError(f"contrasted_area_name: {contrasted_area_name} is unsupported. Choose from 'first_box_entry_to_end' or 'first_box_entry'")
+
+            logger.info(f"contrasted_area_begin: {contrasted_area_begin}")
+            logger.info(f"contrasted_area_end: {contrasted_area_end}")
+
             logger.info(f"short model generation: {new_conv[2].token_ids}")
-            logger.info(f"contrasted area token ids: {conv[4].token_ids[box_idx+2:]}")
+            logger.info(f"contrasted area token ids: {conv[4].token_ids[-contrasted_area_begin:len(conv[4].token_ids)-contrasted_area_end]}")
 
             short_sequence = get_sequence(new_conv, type="id", add_assistant_start=False, full_image_pad=True)
-            #logger.info(f"short_sequence: {short_sequence}")
             sequence = get_sequence(conv, type="id", add_assistant_start=False, full_image_pad=True)
 
-            contrasted_area_len = len(conv[4].token_ids[box_idx+2:])
-            logger.info(f"contrasted_area_len: {contrasted_area_len}")
-
-            contrasted_area_short = (len(short_sequence) - contrasted_area_len, len(short_sequence))
-            contrasted_area = (len(sequence) - contrasted_area_len, len(sequence))
+            contrasted_area_short = (len(short_sequence) - contrasted_area_begin,
+                                     len(short_sequence) - contrasted_area_end)
+            contrasted_area = (len(sequence) - contrasted_area_begin,
+                               len(sequence) - contrasted_area_end)
 
             logger.info(f"contrasted area: {contrasted_area}")
             logger.info(f"contrasted area short: {contrasted_area_short}")
@@ -716,7 +742,7 @@ class MultiTurn:
             assert sequence[contrasted_area[0]:contrasted_area[1]] == short_sequence[contrasted_area_short[0]:contrasted_area_short[1]], f"the contrasted area should contain the same token ids but got full: {sequence[contrasted_area]} and short: {short_sequence[contrasted_area_short]} "
 
         else:
-            raise ValueError(f"the given mode {mode} is not supported. Choose from 'tool_and_box'")
+            raise ValueError(f"the given remove value {remove} is not supported. Choose from 'tool_and_box'")
 
         return {"contrasted_area": contrasted_area,
                 "contrasted_area_short": contrasted_area_short,

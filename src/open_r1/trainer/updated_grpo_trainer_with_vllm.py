@@ -303,7 +303,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         vllm_address: str = None,
         mi_masked_vision_forward_model: str = None,
         mi_full_forward_model: str = None,
-        mi_mode: str = None,
+        mi_mode: dict = None,
         scoring_batch_size_multiplier: int = 1,
         exploration_count: int = 0,
         exploration_pruning_schedule: dict = None,
@@ -775,17 +775,21 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         if self._signature_columns is None:
             self._signature_columns = ["prompt"]
 
-    def _get_per_token_logps_new(self, model, input_ids, attention_mask, image_grid_thw, pixel_values, num_images,
-                                 batch_size, disable_dropout):
+    def _get_per_token_logps(self, model, input_ids, attention_mask, image_grid_thw, pixel_values, num_images,
+                                 batch_size, disable_dropout, return_entropies) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        # the returned entropies have the same dimensionality as the returned logps, seq_len(input_ids) - 1. The code could be extended to allow for
+        # calculation of the uncertainty in generating the next token (whose true label we don't know).
+        # Then the entropies had the same dimensionality as input_ids
         if disable_dropout:
             model.eval()
         max_len = input_ids.size(1)
         #logger.info(f"max_len: {max_len}")
         logp_target_len = max_len - 1
         batch_size = batch_size or input_ids.size(0)  # Chunk inputs into smaller batches to reduce memory peak
-        logger.info(f"_get_per_token_logps_new: batch size: {batch_size}")
-        logger.info(f"_get_per_token_logps_new: inputs_ids_size: {input_ids.size(0)}")
+        logger.info(f"_get_per_token_logps: batch size: {batch_size}")
+        logger.info(f"_get_per_token_logps: inputs_ids_size: {input_ids.size(0)}")
         all_logps = []
+        all_entropies = []
         for start in range(0, input_ids.size(0), batch_size):
             input_ids_batch = input_ids[start: start + batch_size]
             attention_mask_batch = attention_mask[start: start + batch_size]
@@ -811,31 +815,46 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             elif pixel_values is not None:
                 model_inputs["pixel_values"] = pixel_values[start: start + batch_size]
 
-            logger.info(f"_get_per_token_logps_new: directly before forward pass")
+            logger.info(f"_get_per_token_logps: directly before forward pass")
             logits = model(**model_inputs).logits
-            logger.info(f"_get_per_token_logps_new: directly after forward pass")
+            logger.info(f"_get_per_token_logps: directly after forward pass")
 
             logits = logits[:, :-1, :]  # (B, L-1, V), exclude the last logit: it corresponds to the next token pred
             input_ids_batch = input_ids_batch[:, 1:]  # (B, L-1), exclude the first input ID since we don't have logits for it
             # Compute the log probabilities for the input tokens. Use a loop to reduce memory peak.
             per_token_logps = []
+            per_token_entropies = []
             for logits_row, input_ids_row in zip(logits, input_ids_batch):
                 log_probs = logits_row.log_softmax(dim=-1)
                 token_log_prob = torch.gather(log_probs, dim=1, index=input_ids_row.unsqueeze(1)).squeeze(1)
                 per_token_logps.append(token_log_prob)
+
+                if return_entropies:
+                    per_token_entropy = -(log_probs.exp() * log_probs).sum(dim=-1)
+                    per_token_entropies.append(per_token_entropy)
+
             chunk_logps = torch.stack(per_token_logps)
+            if return_entropies:
+                chunk_entropies = torch.stack(per_token_entropies)
             #logger.info(f"chunk_logps before re-pad: {chunk_logps.size(1)}")
             if chunk_logps.size(1) < logp_target_len:
                 pad_len = logp_target_len - chunk_logps.size(1)
                 chunk_logps = torch.nn.functional.pad(chunk_logps, (0, pad_len), value=0.0)
+                if return_entropies:
+                    chunk_entropies = torch.nn.functional.pad(chunk_entropies, (0, pad_len), value=0.0)
             #logger.info(f"chunk_logps after re-pad: {chunk_logps.size(1)}")
             all_logps.append(chunk_logps)
+            if return_entropies:
+                all_entropies.append(chunk_entropies)
 
 
         if disable_dropout:
             model.train()
 
-        return torch.cat(all_logps, dim=0)
+        if return_entropies:
+            return torch.cat(all_logps, dim=0), torch.cat(all_entropies, dim=0)
+        else:
+            return torch.cat(all_logps, dim=0), None
 
     @profiling_decorator
     def _move_model_to_vllm(self):
@@ -1167,7 +1186,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             use_mi_reward = True
 
             if self.mi_mode is None:
-                raise ValueError(f"To use MI you need to specify a mask!")
+                raise ValueError(f"To use MI you need to specify what and how to mask!")
 
             if self.mi_masked_vision_forward_model == "self":
                 mi_masked_vision_forward_model = model
@@ -1191,12 +1210,12 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             if self.num_iterations > 1:
                 #logger.info("before old_per_token_logps calculation")
                 if use_mi_reward:
-                    old_per_token_logps = self._get_per_token_logps_new(model, prompt_ids, prompt_mask,
+                    old_per_token_logps, old_per_token_entropies = self._get_per_token_logps(model, prompt_ids, prompt_mask,
                                                   image_grid_thw=multimodal_inputs["image_grid_thw"],
                                                   pixel_values=multimodal_inputs["pixel_values"],
                                                   num_images=images_per_sample,
                                                   batch_size=self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier,
-                                                  disable_dropout=True)
+                                                  disable_dropout=True, return_entropies=True)
 
                     if torch.isnan(old_per_token_logps).any():
                         logger.info(f"old_per_token_logps contains nan! {old_per_token_logps}")
@@ -1207,12 +1226,12 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
                 else:
                     logger.info(f"in old_per_token_logps: images_per_sample:  {images_per_sample}")
-                    old_per_token_logps = self._get_per_token_logps_new(model, prompt_ids, prompt_mask,
+                    old_per_token_logps, old_per_token_entropies = self._get_per_token_logps(model, prompt_ids, prompt_mask,
                                                   image_grid_thw = multimodal_inputs["image_grid_thw"],
                                                   pixel_values = multimodal_inputs["pixel_values"],
                                                   num_images = images_per_sample,
                                                   batch_size = self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier,
-                                                  disable_dropout=True)
+                                                  disable_dropout=True, return_entropies=True)
 
                 #logger.info("after old_per_token_logps calculation")
 
@@ -1227,12 +1246,12 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                 logger.info("before ref_per_token_logps calculation with frozen model")
                 #logger.info(f"rank: {rank}: directly before ref per token logps calculation")
 
-                ref_per_token_logps = self._get_per_token_logps_new(self.ref_model, prompt_ids, prompt_mask,
+                ref_per_token_logps, ref_per_token_entropies = self._get_per_token_logps(self.ref_model, prompt_ids, prompt_mask,
                                               image_grid_thw=multimodal_inputs["image_grid_thw"],
                                               pixel_values=multimodal_inputs["pixel_values"],
                                               num_images=images_per_sample,
                                               batch_size=self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier,
-                                              disable_dropout=True)
+                                              disable_dropout=True, return_entropies=True)
 
 
                 #logger.info("after ref_per_token_logps calculation")
@@ -1240,13 +1259,13 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                 #logger.info("before unwrap model!")
                 logger.info("before ref_per_token_logps calculation with live model")
                 with self.accelerator.unwrap_model(model).disable_adapter():
-                    ref_per_token_logps = self._get_per_token_logps_new(model, prompt_ids, prompt_mask,
+                    ref_per_token_logps, ref_per_token_entropies = self._get_per_token_logps(model, prompt_ids, prompt_mask,
                                                                         image_grid_thw=multimodal_inputs[
                                                                             "image_grid_thw"],
                                                                         pixel_values=multimodal_inputs["pixel_values"],
                                                                         num_images=images_per_sample,
                                                                         batch_size=self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier,
-                                                                        disable_dropout=True)
+                                                                        disable_dropout=True, return_entropies=True)
                 #logger.info("after ref_per_token_logps calculation with actual model")
 
             contrasted_area = None
@@ -1256,7 +1275,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             if use_mi_reward:
 
                 input_ids_mi, image_positions_mi, reduced_images_per_sample, considered_seqs = multi_turn_manager.get_shortened_sequences(
-                    mode=self.mi_mode)
+                    remove=self.mi_mode["remove"], contrasted_area=self.mi_mode["contrasted_area"], bridge=self.mi_mode["bridge"])
 
                 mask_mi = [[1 for _ in seq] for seq in input_ids_mi]
                 logger.info(f"mask_mi before pad: {[len(s) for s in mask_mi]}")
@@ -1286,30 +1305,47 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
                 logger.info(f"mi_batch_size: {mi_batch_size}")
 
-                vision_masked_per_token_logps = self._get_per_token_logps_new(mi_masked_vision_forward_model,
+                vision_masked_per_token_logps, vision_masked_per_token_entropies = self._get_per_token_logps(mi_masked_vision_forward_model,
                                                                               input_ids=inputs_mi["input_ids"],
                                                                               attention_mask = inputs_mi["attention_mask"],
                                           image_grid_thw=inputs_mi["image_grid_thw"],
                                           pixel_values=inputs_mi["pixel_values"],
                                           num_images=reduced_images_per_sample,
                                           batch_size=mi_batch_size,
-                                          disable_dropout=True)
+                                          disable_dropout=True, return_entropies=True)
 
-
-                logger.info(f"masked_logps: {vision_masked_per_token_logps}")
-
-                logger.info(f"old_per_token_logps: {old_per_token_logps}")
-
+                if self.mi_mode["contrasted_score"] == "entropy":
+                    vision_masked_per_token_score = vision_masked_per_token_entropies
+                elif self.mi_mode["contrasted_score"] == "log_probs":
+                    vision_masked_per_token_score = vision_masked_per_token_logps
+                else:
+                    raise ValueError(
+                        f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. Choose from ['entropy', 'log_probs']")
 
                 if self.mi_full_forward_model == "self":
-                    full_forward_logps = old_per_token_logps
+                    if self.mi_mode["contrasted_score"] == "entropy":
+                        full_forward_score = old_per_token_entropies
+                    elif self.mi_mode["contrasted_score"] == "log_probs":
+                        full_forward_score = old_per_token_logps
+                    else:
+                        raise ValueError(f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. Choose from ['entropy', 'log_probs']")
                 elif self.mi_full_forward_model == "reference":
-                    full_forward_logps = ref_per_token_logps
+                    if self.mi_mode["contrasted_score"] == "entropy":
+                        full_forward_score = ref_per_token_entropies
+                    elif self.mi_mode["contrasted_score"] == "log_probs":
+                        full_forward_score = ref_per_token_logps
+                    else:
+                        raise ValueError(
+                            f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. Choose from ['entropy', 'log_probs']")
                 else:
                     raise ValueError("mi_full_forward_model must be 'self' or 'reference'")
 
+                logger.info(f"masked_score: {vision_masked_per_token_score}")
+
+                logger.info(f"full_score: {full_forward_score}")
+
                 contrast_diff_list = []
-                for idx in range(full_forward_logps.shape[0]):
+                for idx in range(full_forward_score.shape[0]):
                     if not considered_seqs[idx]["dummy"]:
                         contrasted_area = considered_seqs[idx]["contrasted_area"]
                         contrasted_area_short = considered_seqs[idx]["contrasted_area_short"]
@@ -1322,8 +1358,8 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                         assert contrasted_area_short[0] > 0
                         assert contrasted_area_short[1] > contrasted_area_short[0]
 
-                        contrast_diff = (full_forward_logps[idx, contrasted_area[0] - 1: contrasted_area[1] - 1] -
-                                         vision_masked_per_token_logps[
+                        contrast_diff = (full_forward_score[idx, contrasted_area[0] - 1: contrasted_area[1] - 1] -
+                                         vision_masked_per_token_score[
                                              idx, contrasted_area_short[0] - 1: contrasted_area_short[1] - 1])
 
                         contrast_diff_list.append(contrast_diff.detach())
@@ -1536,12 +1572,13 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         #self.monitor_gpu_usage("compute loss: before live per_token_logps")
         t8 = time.time()
         # Get the current policy's log probabilities
-        per_token_logps = self._get_per_token_logps_new(model, prompt_ids, prompt_mask,
+        per_token_logps, _ = self._get_per_token_logps(model, prompt_ids, prompt_mask,
                                               image_grid_thw=multimodal_inputs["image_grid_thw"],
                                               pixel_values=multimodal_inputs["pixel_values"],
                                               num_images=num_images,
                                               batch_size=self.args.per_device_train_batch_size,
-                                              disable_dropout=False)
+                                              disable_dropout=False,
+                                              return_entropies=False)
         t9 = time.time()
         self._metrics["live_logp_time"].append(t9 - t8)
 

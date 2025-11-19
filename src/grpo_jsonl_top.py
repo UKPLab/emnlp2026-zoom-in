@@ -194,10 +194,31 @@ class GRPOScriptArguments(ScriptArguments):
         }
     )
 
-    ignored_prefix_len: Optional[int] = field(
+    mi_contrasted_area: Optional[str] = field(
         default = None,
         metadata={
-            "help": "the diff in the first few (1-3) tokens is very high, we can ignore it."
+            "help": "which part of the sequence should be contrasted. choose from 'first_box_entry', 'first_box_entry_to_end"
+        }
+    )
+
+    mi_removed_area: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "which part of the sequence should be removed, so the contrast is not trivial. choose from 'tool_to_box'"
+        }
+    )
+
+    mi_contrasted_score: Optional[str] = field(
+        default="log_probs",
+        metadata={
+            "help": "what to contrast. choose from ['log_probs', 'entropy']"
+        }
+    )
+
+    mi_short_bridge: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "what to insert after the removed area and before the contrasted area. Choose from 'double_newline', 'double_newline,the,answer,is' or None"
         }
     )
 
@@ -231,12 +252,7 @@ class GRPOScriptArguments(ScriptArguments):
         }
     )
 
-    mi_mode: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": "which part to mask and what to contrast for logprob diff. look into multi_turn_manager.py for details "
-        }
-    )
+
 
     scoring_batch_size_multiplier: Optional[int] = field(
         default=1,
@@ -447,6 +463,11 @@ def main(script_args, training_args, model_args):
         chat_template = None
 
 
+    mi_mode = {"contrasted_area": script_args.mi_contrasted_area,
+               "remove": script_args.mi_removed_area,
+               "contrasted_score": script_args.mi_contrasted_score,
+               "bridge": script_args.mi_short_bridge}
+
     if script_args.tool_config != "no_tool":
         tools = Tool(name=tool_args["tool_name"],
              description=tool_args["tool_description"],
@@ -493,7 +514,7 @@ def main(script_args, training_args, model_args):
             vllm_address = vllm_address,
             mi_masked_vision_forward_model = script_args.mi_masked_vision_forward_model,
             mi_full_forward_model = script_args.mi_full_forward_model,
-            mi_mode = script_args.mi_mode,
+            mi_mode = mi_mode,
             scoring_batch_size_multiplier = script_args.scoring_batch_size_multiplier,
             exploration_pruning_schedule=exploration_pruning_schedule,
         )
