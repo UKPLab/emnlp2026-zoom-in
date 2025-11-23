@@ -1,11 +1,14 @@
 import traceback
-from typing import Union, Tuple, List, Optional
+from typing import Any, Iterable, List, Optional, Sequence, Union, Tuple
 
 import numpy as np
 from numpy import array
 import torch
 import json
 import os
+import copy
+
+from prometheus_client import bridge
 
 from .tools import TOOL_END, TOOL_START, Tool, extract_tool
 from .logger import get_logger
@@ -30,7 +33,26 @@ SPECIAL_TOKENS = {
     "assistant":    {"id": 77091, "text": "assistant"},
 
     "newline":      {"id": 198, "text": "\n"},
-    "turn_separator": {"id": 198, "text": "\n"}
+    "turn_separator": {"id": 198, "text": "\n"},
+
+    "tool_start": {"id": 151657, "text": "<tool_call>"},
+    "tool_end": {"id": 151658, "text": "</tool_call>"},
+
+    # from here on, we only use the ID, no guarantee that the text is correct (escaping etc)
+    "backslash": {"id": 1124, "text": "\\"},
+    "double_backslash": {"id": 59, "text": "\\\\"},
+    # C is newline
+    "dot_CC": {"id": 382, "text": ".ĊĊ"},
+    # G is whitespace
+    "CC": {"id": 4710, "text": "ĠĊĊ"},
+    "C": {"id": 715, "text": "ĠĊ"},
+
+    "box": {"id": 79075, "text": "boxed"},
+    "open_curly_bracket": {"id": 90, "text": "{"},
+
+    "the": {"id": 785, "text": "The"},
+    "answer": {"id": 4226, "text": " answer"},
+    "is": {"id": 374, "text": " is"},
 }
 
 class Turn:
@@ -48,7 +70,8 @@ class Turn:
                  pixel_values_list: List[np.array] = None,
                  image_sizes:list[Tuple[int, int]]=None,
                  attempted_tool_call:bool = None,
-                 successful_tool_call:bool = None):
+                 successful_tool_call:bool = None,
+                 is_dummy:bool = False):
         self.text = text
         self.role = role
 
@@ -71,6 +94,8 @@ class Turn:
         self.attempted_tool_call = attempted_tool_call
         self.successful_tool_call = successful_tool_call
 
+        self.is_dummy = is_dummy
+
     def wrap(self, type: str, full_image_pad: bool) -> Union[str, list[int]]:
         """ valid types are 'text' and 'id' """
         if type == "text":
@@ -78,8 +103,11 @@ class Turn:
                     f"{SPECIAL_TOKENS[self.role][type]}"
                     f"{SPECIAL_TOKENS['newline'][type]}"
                    f"{self.text}")
-            if self.role != "assistant":
-                seq += f"{SPECIAL_TOKENS['turn_end'][type]}"
+            if self.role != "assistant" or not seq.endswith(SPECIAL_TOKENS['turn_end'][type]):
+                if not self.is_dummy:
+                    seq += f"{SPECIAL_TOKENS['turn_end'][type]}"
+            #if self.role != "assistant":
+            #    seq += f"{SPECIAL_TOKENS['turn_end'][type]}"
         elif type == "id":
             seq = []
             seq.append(SPECIAL_TOKENS['turn_start'][type])
@@ -90,8 +118,9 @@ class Turn:
             else:
                 seq += self.token_ids_shorten_image
 
-            if self.role != "assistant":
-                seq.append(SPECIAL_TOKENS['turn_end'][type])
+            if self.role != "assistant" or seq[-1] != SPECIAL_TOKENS['turn_end'][type]:
+                if not self.is_dummy:
+                    seq.append(SPECIAL_TOKENS['turn_end'][type])
         else:
             raise ValueError(f"Invalid turn type: {type}, choose from 'id', 'text'")
 
@@ -108,6 +137,8 @@ class Turn:
             seq.append(0)
             if self.role == "assistant":
                 seq += [1 for _ in self.token_ids]
+                if seq[-1] != SPECIAL_TOKENS['turn_end']["id"]:
+                    seq.append(0)
             else:
                 seq += [0 for _ in self.token_ids]
                 #seq.append(SPECIAL_TOKENS['turn_end'][type])
@@ -372,21 +403,8 @@ class MultiTurn:
             if ignore_finished and self.is_finished[idx]:
                 continue
             conv = self.all_multi_turn[idx].copy()
-            if add_assistant_start and conv[-1].role == "user":
-                conv.append(Turn(role="assistant", text="", token_ids = [], token_ids_shorten_image=[]))
 
-            if type == "text":
-                seqs.append(SPECIAL_TOKENS["turn_separator"][type].join([turn.wrap(type, full_image_pad=full_image_pad) for turn in conv]))
-            elif type == "id":
-                seq = []
-                for conv_idx, turn in enumerate(conv):
-                    seq += turn.wrap(type, full_image_pad=full_image_pad)
-                    if conv_idx + 2 <= len(conv):
-                        seq.append(SPECIAL_TOKENS["turn_separator"][type])
-
-                seqs.append(seq)
-            else:
-                raise ValueError(f"type {type} not supported, choose from 'id' and 'text'")
+            seqs.append(get_sequence(conv, type, add_assistant_start, full_image_pad))
 
         return seqs
 
@@ -513,14 +531,25 @@ class MultiTurn:
 
         return seqs
 
-    def get_model_generations(self) -> list[str]:
+    def get_model_generations(self, type:str) -> list[str]:
+        """
+        type is 'text' or 'id'
+        """
         full_model_generations = []
         for idx in range(self.batch_size):
             conv = self.all_multi_turn[idx]
-            model_generations = ""
+            if type == "text":
+                model_generations = ""
+            elif type == "id":
+                model_generations = []
+            else:
+                raise ValueError(f"type {type} not supported, choose from 'text', 'id'")
             for conv_idx, turn in enumerate(conv):
                 if turn.role == "assistant":
-                    model_generations += turn.text
+                    if type == "text":
+                        model_generations += turn.text
+                    if type == "id":
+                        model_generations += turn.token_ids_shorten_image
             full_model_generations.append(model_generations)
         return full_model_generations
 
@@ -552,11 +581,20 @@ class MultiTurn:
 
         return full_model_generations
 
-    def get_multimodal(self, type:str) -> np.array:
+    def get_multimodal(self, type:str, positions:dict[int, list[int]] = None) -> np.array:
+        """
+        type is either "image_grid_thw" or "pixel_values"
+        positions is a dict of the form {0: [1, 3]} and indicates that only the images
+        from the first and third turn (i.e. zeroth and first user turn) of the zeroth conversation should be used
+        """
         multimodal_list = []
         for idx in range(self.batch_size):
+            if positions is not None and idx not in positions.keys():
+                continue
             conv = self.all_multi_turn[idx]
-            for conv_idx, turn in enumerate(conv):
+            for turn_idx, turn in enumerate(conv):
+                if positions is not None and turn_idx not in positions[idx]:
+                    continue
                 if type == "image_grid_thw":
                     if turn.image_grid_thw_list is not None:
                         multimodal_list += turn.image_grid_thw_list
@@ -568,6 +606,153 @@ class MultiTurn:
 
         return np.concatenate(multimodal_list)
 
+    def get_shortened_sequences(self, remove:str, contrasted_area:str, bridge:str):
+        """
+        returns
+        inputs: list[str] ,
+        the image positions: dict[int, list[int]} ,
+        considered seqs: dict[int, dict[contrasted_area: tuple, contrasted_area_short: tuple]
+        """
+        considered_seqs = {}
+        for idx in range(self.batch_size):
+            conv = self.all_multi_turn[idx]
+            validity = self.get_shortened_sequence(conv, remove=remove, contrasted_area_name=contrasted_area, bridge=bridge)
+            if validity is not None:
+                considered_seqs[idx] = validity
+            else:
+                considered_seqs[idx] = {"contrasted_area": [0,1],
+                                                    "contrasted_area_short": [0,1],
+                                                    "short_sequence": get_sequence(conv, type="id",
+                                                                                   add_assistant_start=False,
+                                                                                   full_image_pad=True),
+                                                    "image_turns": range(len(conv)),
+                                                    "dummy": True}
+
+
+
+
+        input_ids = [v["short_sequence"] for v in considered_seqs.values()]
+
+        positions = {k:v["image_turns"] for k,v in considered_seqs.items()}
+
+        images_per_sample = []
+        for conv_id, v in considered_seqs.items():
+            images_per_conv = 0
+            for turn_id in v["image_turns"]:
+                if self.all_multi_turn[conv_id][turn_id].image_paths is not None:
+                    images_per_conv += len(self.all_multi_turn[conv_id][turn_id].image_paths)
+            images_per_sample.append(images_per_conv)
+
+        return input_ids, positions, images_per_sample, considered_seqs
+
+
+
+    def get_shortened_sequence(self, conv: list[Turn], remove:str, contrasted_area_name: str, bridge: str) -> Optional[dict]:
+        if remove == "tool_to_box":
+            # system, user, model, tool_exec, model
+
+            # the end of the reasoning chain usually looks like this:
+            # end_text = [". ", "\\", "boxed", "{", ..., "}", "<|im_end|>"]
+            # end_token = [382, 59, 79075, 90, ..., 92, 151645]
+            #
+            # the tool use looks like this:
+            # tool_text = [".",  "<tool_call>", ..., "</tool_call>", "<|im_end|>"]
+            # tool_token = [13, 151657,     ..., 151658,      151645]
+            #
+            # the idea is to replace tool_token with end_token and
+            # calculate the logp diff on [..., 92, 151645], i.e. everything after boxed{
+
+
+            if len(conv) != 5:
+                return None
+            if len(conv[2].token_ids) == 0:
+                return None
+
+            # searching from behind to get the last tool call
+            tool_start_idx = rindex_any(conv[2].token_ids, SPECIAL_TOKENS["tool_start"]["id"])
+
+            if len(conv[4].token_ids) == 0:
+                return None
+
+            box_idx = rindex_any(conv[4].token_ids,
+                                 [SPECIAL_TOKENS["box"]["id"],
+                                               SPECIAL_TOKENS["open_curly_bracket"]["id"]])
+
+            if box_idx is None:
+                return None
+
+            new_conv = copy.deepcopy(conv)
+
+            # only keep (system, user, model)
+            new_conv = new_conv[:3]
+            # get rid of tool call and the "." before (if applicable)
+            # cutoff_idx = max(tool_start_idx - 1, 0)
+
+            # get rid of tool call
+            cutoff_idx = max(tool_start_idx, 0)
+            new_conv[2].token_ids = conv[2].token_ids[:cutoff_idx]
+
+            # between M_1^R and boxed{
+            if bridge is None:
+                new_conv[2].token_ids += [SPECIAL_TOKENS["backslash"]["id"]]
+            elif bridge == "double_newline":
+                new_conv[2].token_ids += [SPECIAL_TOKENS["CC"]["id"],
+                                          SPECIAL_TOKENS["backslash"]["id"],
+                                          ]
+            elif bridge == "double_newline,the,answer,is":
+                new_conv[2].token_ids += [SPECIAL_TOKENS["CC"]["id"],
+                                          SPECIAL_TOKENS["the"]["id"],
+                                          SPECIAL_TOKENS["answer"]["id"],
+                                          SPECIAL_TOKENS["is"]["id"],
+                                          SPECIAL_TOKENS["backslash"]["id"],
+                                          ]
+            else:
+                raise ValueError(f"bridge: {bridge} is unsupported. Choose from 'double_newline', 'double_newline,the,answer,is' or None")
+
+            # add answer
+            new_conv[2].token_ids += conv[4].token_ids[box_idx:]
+
+            # indices are relative and from the right
+            if contrasted_area_name == "first_box_entry_to_end":
+                contrasted_area_begin = len(conv[4].token_ids[box_idx+2:])
+                contrasted_area_end = 0
+            elif contrasted_area_name == "first_box_entry":
+                contrasted_area_begin = len(conv[4].token_ids[box_idx + 2:])
+                contrasted_area_end = contrasted_area_begin - 1
+            else:
+                raise ValueError(f"contrasted_area_name: {contrasted_area_name} is unsupported. Choose from 'first_box_entry_to_end' or 'first_box_entry'")
+
+            logger.info(f"contrasted_area_begin: {contrasted_area_begin}")
+            logger.info(f"contrasted_area_end: {contrasted_area_end}")
+
+            # can happen if generation ends with "\boxed{"
+            if contrasted_area_begin == 0:
+                return None
+
+            logger.info(f"short model generation: {new_conv[2].token_ids}")
+            logger.info(f"contrasted area token ids: {conv[4].token_ids[-contrasted_area_begin:len(conv[4].token_ids)-contrasted_area_end]}")
+
+            short_sequence = get_sequence(new_conv, type="id", add_assistant_start=False, full_image_pad=True)
+            sequence = get_sequence(conv, type="id", add_assistant_start=False, full_image_pad=True)
+
+            contrasted_area_short = (len(short_sequence) - contrasted_area_begin,
+                                     len(short_sequence) - contrasted_area_end)
+            contrasted_area = (len(sequence) - contrasted_area_begin,
+                               len(sequence) - contrasted_area_end)
+
+            logger.info(f"contrasted area: {contrasted_area}")
+            logger.info(f"contrasted area short: {contrasted_area_short}")
+
+            assert sequence[contrasted_area[0]:contrasted_area[1]] == short_sequence[contrasted_area_short[0]:contrasted_area_short[1]], f"the contrasted area should contain the same token ids but got full: {sequence[contrasted_area]} and short: {short_sequence[contrasted_area_short]} "
+
+        else:
+            raise ValueError(f"the given remove value {remove} is not supported. Choose from 'tool_and_box'")
+
+        return {"contrasted_area": contrasted_area,
+                "contrasted_area_short": contrasted_area_short,
+                "short_sequence": short_sequence,
+                "image_turns": [0,1,2],
+                "dummy": False}
 
     def check(self, all_multimodal_inputs: list[dict], all_multimodal_token_inputs: list[dict],
               input_text: list[str]):
@@ -740,7 +925,61 @@ def pad(unpadded: list[list[int]], padding_side: str, padding_value: int) -> lis
         padded.append(seq)
     return padded
 
+def _is_subseq_at(seq: Sequence[Any], sub: Sequence[Any], start: int) -> bool:
+    """Return True if sub matches seq[start:start+len(sub)]."""
+    end = start + len(sub)
+    if end > len(seq):
+        return False
+    # Fast path single element
+    if len(sub) == 1:
+        return seq[start] == sub[0]
+    return list(seq[start:end]) == list(sub)
 
+def rindex_any(seq: Sequence[Any], value_or_subseq: Union[Any, Sequence[Any]]) -> Optional[int]:
+    """
+    Return the starting index of the last occurrence of value_or_subseq in seq.
+    - Works for single elements and contiguous sublists/sequences.
+    - Returns None if not found.
+    """
+    # Normalize to a sequence for unified handling
+    if isinstance(value_or_subseq, (list, tuple)):
+        sub = list(value_or_subseq)
+    else:
+        sub = [value_or_subseq]
+
+    n = len(seq)
+    m = len(sub)
+    if m == 0:
+        return None  # define empty pattern as not found
+
+    # Search from the end
+    # Last possible start index is n - m
+    for i in range(n - m, -1, -1):
+        if _is_subseq_at(seq, sub, i):
+            return i
+    return None
+
+def get_sequence(conv: list[Turn], type: str, add_assistant_start: bool, full_image_pad: bool) -> Union[list[int], str]:
+
+    if add_assistant_start and conv[-1].role == "user":
+        conv.append(Turn(role="assistant", text="", token_ids=[], token_ids_shorten_image=[], is_dummy=True))
+
+    if type == "text":
+        seq = SPECIAL_TOKENS["turn_separator"][type].join(
+            [turn.wrap(type, full_image_pad=full_image_pad) for turn in conv])
+
+    elif type == "id":
+        seq = []
+        for conv_idx, turn in enumerate(conv):
+            seq += turn.wrap(type, full_image_pad=full_image_pad)
+            if conv_idx + 2 <= len(conv):
+                seq.append(SPECIAL_TOKENS["turn_separator"][type])
+
+
+    else:
+        raise ValueError(f"type {type} not supported, choose from 'id' and 'text'")
+
+    return seq
 
 
 

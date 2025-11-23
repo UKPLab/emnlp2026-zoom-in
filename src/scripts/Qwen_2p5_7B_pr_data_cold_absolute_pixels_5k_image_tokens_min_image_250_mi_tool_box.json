@@ -6,7 +6,7 @@
     "dataset_name": "pixel_reasoner",
     "data_file_paths": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/pixel_reasoner/RL_data_without_video/train.jsonl",
     "image_folders": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/pixel_reasoner/RL_data_without_video",
-    "max_completion_length": 512,
+    "max_completion_length": 256,
     "ds3_gather_for_generation": true,
     "use_vllm": true,
     "beta": 0.04,
@@ -28,24 +28,27 @@
     "multi_turn": "tool",
     "reward_funcs": [
       "accuracy",
-      "pr_penalty",
-      "curiosity"
+      "mutual_information"
     ],
     "reward_func_weights": [
       1.0,
-      0.05,
-      0.5
+      0.1
     ],
-    "tool_use_penalty_threshold": 1,
-    "pixel_reasoning_threshold": 0.3,
+    "mutual_information_clip_value": 1.5,
+    "mi_mode": "tool_and_box",
+    "mutual_information_len_scaling": 1,
+    "mutual_information_len_exponent": 1,
+    "mi_tanh": true,
+    "mi_masked_vision_forward_model": "self",
+    "mi_full_forward_model": "self",
     "chat_template": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/qwen_chat_template_tool.json",
     "per_device_eval_batch_size": 4,
     "learning_rate": 1e-6,
     "lr_scheduler_type": "cosine",
     "warmup_ratio": 0.03,
-    "max_tool_uses": 2,
+    "max_tool_uses": 1,
     "max_pixels": 3920000,
-    "min_pixels": 392000,
+    "min_pixels": 196000,
     "epsilon": 0.2,
     "tool_config": "PR_zoom_in_old",
     "global_buffer": true,
@@ -59,7 +62,7 @@
     "min_pixels": "infer",
     "max_pixels": "infer",
     "enable_prefix_caching": true,
-    "limit_image_per_prompt": 4
+    "limit_image_per_prompt": 3
   }
 }
 

@@ -67,6 +67,10 @@ class GRPOScriptArguments(ScriptArguments):
         default_factory=lambda: [1.0],
         metadata={"help": "Weights for reward functions. Must have the same length as reward_funcs"},
     )
+    reward_func_usage: list[str] = field(
+        default=None,
+        metadata={"help": "specifies for each reward function if it should be used for 'reward', 'sampling_weights' or 'both'"}
+    )
     max_pixels: Optional[int] = field(
         default=12845056,
         metadata={"help": "Maximum number of pixels for the image (for QwenVL)"},
@@ -197,7 +201,35 @@ class GRPOScriptArguments(ScriptArguments):
     ignored_prefix_len: Optional[int] = field(
         default = None,
         metadata={
-            "help": "the diff in the first few (1-3) tokens is very high, we can ignore it."
+            "help": "deprecated. use mi_contrasted_area instead"
+        }
+    )
+
+    mi_contrasted_area: Optional[str] = field(
+        default = None,
+        metadata={
+            "help": "which part of the sequence should be contrasted. choose from 'first_box_entry', 'first_box_entry_to_end"
+        }
+    )
+
+    mi_removed_area: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "which part of the sequence should be removed, so the contrast is not trivial. choose from 'tool_to_box'"
+        }
+    )
+
+    mi_contrasted_score: Optional[str] = field(
+        default="log_probs",
+        metadata={
+            "help": "what to contrast. choose from ['log_probs', 'entropy']"
+        }
+    )
+
+    mi_short_bridge: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "what to insert after the removed area and before the contrasted area. Choose from 'double_newline', 'double_newline,the,answer,is' or None"
         }
     )
 
@@ -231,12 +263,7 @@ class GRPOScriptArguments(ScriptArguments):
         }
     )
 
-    mi_mask: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": "which part to mask. look into parser.py for details "
-        }
-    )
+
 
     scoring_batch_size_multiplier: Optional[int] = field(
         default=1,
@@ -275,6 +302,16 @@ class GRPOScriptArguments(ScriptArguments):
             "help": "the constant exploration reward for the tool use"
         }
     )
+
+    tool_bbox_type: Optional[str] = field(
+        default='strict',
+        metadata={
+            "help": "the type of bbox coordinates to accept. choose from 'absolute' (int) or 'relative' (float). If None, both are accepted."
+                    "If 'strict', absolute and relative are automatically inferred based on the tool"
+        }
+    )
+
+
 
 
 
@@ -384,6 +421,12 @@ def main(script_args, training_args, model_args):
     reward_funcs = [reward_funcs_registry[func] for func in script_args.reward_funcs]
     assert len(reward_funcs) == len(script_args.reward_func_weights), f"the number of reward functions {reward_funcs} must be equal to the number of reward function weights {script_args.reward_func_weights}"
     logger.info(f"!!! reward_funcs !!!:\n {reward_funcs} \n!!! reward_funcs !!!")
+    if script_args.reward_func_usage is None:
+        reward_func_usage = ["both" for _ in range(len(reward_funcs))]
+        logger.info(f"as reward_func_usage is None, we assume that it is 'both' for all reward_funcs")
+    else:
+        reward_func_usage = script_args.reward_func_usage
+    assert len(reward_funcs) == len(reward_func_usage), f"the number of reward functions {reward_funcs} must be equal to the number of reward function usages {reward_func_usage}"
 
     dataset_names = script_args.dataset_name.split(":")
     data_files = script_args.data_file_paths.split(":")
@@ -437,6 +480,11 @@ def main(script_args, training_args, model_args):
         chat_template = None
 
 
+    mi_mode = {"contrasted_area": script_args.mi_contrasted_area,
+               "remove": script_args.mi_removed_area,
+               "contrasted_score": script_args.mi_contrasted_score,
+               "bridge": script_args.mi_short_bridge}
+
     if script_args.tool_config != "no_tool":
         tools = Tool(name=tool_args["tool_name"],
              description=tool_args["tool_description"],
@@ -445,7 +493,8 @@ def main(script_args, training_args, model_args):
                              tool_args["tool_message_text_fillers"]),
              parameter_descriptions=tool_args["tool_parameter_descriptions"],
                      tool_hparams={"max_pixels": script_args.max_pixels,
-                                   "min_pixels": script_args.min_pixels})
+                                   "min_pixels": script_args.min_pixels,
+                                   "bbox_type": script_args.tool_bbox_type})
     else:
         tools = None
 
@@ -464,6 +513,7 @@ def main(script_args, training_args, model_args):
             model=model_args.model_name_or_path,
             reward_funcs=reward_funcs,
             reward_func_weights=script_args.reward_func_weights,
+            reward_func_usage=reward_func_usage,
             args=training_args,
             vlm_module=vlm_module_cls(),
             train_dataset=splits['train'].select(data_range) if data_range is not None else splits['train'],
@@ -482,7 +532,7 @@ def main(script_args, training_args, model_args):
             vllm_address = vllm_address,
             mi_masked_vision_forward_model = script_args.mi_masked_vision_forward_model,
             mi_full_forward_model = script_args.mi_full_forward_model,
-            mi_mask = script_args.mi_mask,
+            mi_mode = mi_mode,
             scoring_batch_size_multiplier = script_args.scoring_batch_size_multiplier,
             exploration_pruning_schedule=exploration_pruning_schedule,
         )

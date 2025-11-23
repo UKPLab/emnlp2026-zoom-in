@@ -116,6 +116,7 @@ class VLLM:
                 img_sizes.append(img_size)
 
             logger.info(f"directly before vllm generate")
+            logger.info(f"inputs_with_image: {inputs_with_image}")
             all_outputs = self.llm.generate(inputs_with_image, sampling_params=sampling_params)
 
             logger.info(f"after vllm generate")
@@ -167,8 +168,6 @@ class Evaluator:
 
         # _tool_fixed_crop
         #self.eval_path = os.path.join(self.save_path, f"dataset_{dataset['dataset_name']}_prompt_{prompt_type}")
-
-
 
         hf_dataset = self.preprocess_dataset(dataset, prompt_type, tools).select_columns(["prompt", "image_path",
                                                                                    "solution", "accu_reward_method"])
@@ -280,17 +279,6 @@ class Evaluator:
                 try:
                     completion_ids_token_based = self.vllm_client.generate(prompts=all_multimodal_token_inputs,
                                                                            sampling_params=self.sampling_params)
-                    #completion_ids_token_based = self.vllm_client.generate_from_multimodal_token_input(
-                    #    prompts=all_multimodal_token_inputs,
-                    #    n=self.num_generations if conv_round == 0 else 1,
-                    #    repetition_penalty=self.repetition_penalty,
-                    #    temperature=self.temperature,
-                    #    top_p=self.top_p,
-                    #    top_k=-1 if self.top_k is None else self.top_k,
-                    #    min_p=0.0 if self.min_p is None else self.min_p,
-                    #    max_tokens=self.max_completion_length,
-                    #    guided_decoding_regex=self.guided_decoding_regex,
-                    #)
                     vllm_generation_has_worked = True
                 except Exception as e:
                     logger.info(f"Generation {attempts} failed with exception:", e)
@@ -372,7 +360,7 @@ class Evaluator:
 
         logger.info(f"overall_tools_used: {overall_tools_used}")
 
-        model_generations = multi_turn_manager.get_model_generations()
+        model_generations = multi_turn_manager.get_model_generations(type="text")
 
         logger.info(f"model_generations for reward calculation: {model_generations}")
 
@@ -393,6 +381,7 @@ class Evaluator:
         accuracies = np.array(accuracies)
         self.metrics["accuracy"] += accuracies.tolist()
         self.metrics["model_answer"] += completions
+        self.metrics["model_answer_tokenized"] += multi_turn_manager.get_model_generations(type="id")
         self.metrics["solution"] += solutions
         self.metrics["images"] += all_image_paths
 
@@ -456,7 +445,8 @@ def evaluation_process(model_path, model_class, output_path:str, tensor_parallel
         max_tool_uses=max_tool_uses,
         save_path=output_path,
         vllm_client=llm_engine,
-        metrics=["accuracy", "tool_use", "attempted_tool_use", "query", "solution", "model_answer", "images", "image_sizes", "completion_len"]
+        metrics=["accuracy", "tool_use", "attempted_tool_use", "query", "solution",
+                 "model_answer", "model_answer_tokenized", "images", "image_sizes", "completion_len"]
     )
     
     t0 = time.time()

@@ -32,14 +32,13 @@ TOOL_CONFIGS = {
         },
             "PR_zoom_in_old":
             {
-                "tool_name": "zoom_in",
-                "tool_description": "Zoom in on the image based on the bounding box coordinates.",
-                "tool_parameter_descriptions": {
-                    "bbox_2d": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image."},
+                "tool_name": "zoom_in_absolute",
+                "tool_description": "Zoom in on the image based on the bounding box coordinates. It is useful when the object or text in the image is too small to be seen.",
+                "tool_parameter_descriptions": {},
                 "tool_message_image_pos": "last",
                 "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
                 "tool_message_text_fillers": ["width", "height"],
-                "prompt_type": "pr_adapted"
+                "prompt_type": "pr_adapted",
             },
             "PR_zoom_in_old_exploration":
             {
@@ -54,14 +53,13 @@ TOOL_CONFIGS = {
             },
             "PR_zoom_in_new":
                 {
-                    "tool_name": "zoom_in",
-                    "tool_description": "Zoom in on the image based on the bounding box coordinates.",
-                    "tool_parameter_descriptions": {
-                        "bbox_2d": "normalized coordinates for bounding box of the region you want to zoom in. Values should be within [0.0,1.0]."},
+                    "tool_name": "zoom_in_relative",
+                    "tool_description": "Zoom in on the image based on the bounding box coordinates. It is useful when the object or text in the image is too small to be seen.",
+                    "tool_parameter_descriptions": {},
                     "tool_message_image_pos": "last",
                     "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
                     "tool_message_text_fillers": ["width", "height"],
-                    "prompt_type": "pr_adapted"
+                    "prompt_type": "pr_adapted",
                 },
             "first_own_training":
                 {
@@ -98,8 +96,6 @@ TOOL_CONFIGS = {
 
         }
 
-
-
 SHOW_IMAGE = {
         "type": "function",
         "function": {
@@ -119,10 +115,10 @@ SHOW_IMAGE = {
         },
     }
 
-ZOOM_IN = {
+ZOOM_IN_RELATIVE = {
         "type": "function",
         "function": {
-            "name": "zoom_in",
+            "name": "zoom_in_relative",
             "description": "Zoom in on the image based on the bounding box coordinates.",
             "parameters": {
                 "type": "object",
@@ -133,6 +129,31 @@ ZOOM_IN = {
                         # "description": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image.",
                         "items": {
                         "type": "float",
+                        }
+                    },
+                    "target_image":{
+                        "type": "integer",
+                        "description": "The index of the image to crop. Index from 1 to the number of images. Choose 1 to operate on original image."
+                    }
+                },
+                "required": ["bbox_2d", "target_image"]
+            }
+        },
+    }
+
+ZOOM_IN_ABSOLUTE = {
+        "type": "function",
+        "function": {
+            "name": "zoom_in_absolute",
+            "description": "Zoom in on the image based on the bounding box coordinates.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bbox_2d": {
+                        "type": "array",
+                        "description":"coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image.",
+                        "items": {
+                        "type": "integer",
                         }
                     },
                     "target_image":{
@@ -239,11 +260,37 @@ class Tool:
         if self.name == "show_image":
             self.callable_function = show_image
             self.tool_dict = SHOW_IMAGE
-        elif self.name == "zoom_in":
+        elif self.name == "zoom_in_absolute":
+            if "bbox_type" in self.tool_hparams.keys():
+                if self.tool_hparams["bbox_type"] in ["strict", "absolute"]:
+                    bbox_type = "absolute"
+                else:
+                    bbox_type = self.tool_hparams["bbox_type"]
+            else:
+                bbox_type = None
+
             self.callable_function = partial(zoom_in,
                                              min_pixels=self.tool_hparams["min_pixels"] if "min_pixels" in self.tool_hparams.keys() else None,
-                                             max_pixels=self.tool_hparams["max_pixels"] if "max_pixels" in self.tool_hparams.keys() else None)
-            self.tool_dict = ZOOM_IN
+                                             max_pixels=self.tool_hparams["max_pixels"] if "max_pixels" in self.tool_hparams.keys() else None,
+                                             bbox_type=bbox_type)
+            self.tool_dict = ZOOM_IN_ABSOLUTE
+        elif self.name == "zoom_in_relative":
+            if "bbox_type" in self.tool_hparams.keys():
+                if self.tool_hparams["bbox_type"] in ["strict", "relative"]:
+                    bbox_type = "relative"
+                else:
+                    bbox_type = self.tool_hparams["bbox_type"]
+            else:
+                bbox_type = None
+
+            self.callable_function = partial(zoom_in,
+                                             min_pixels=self.tool_hparams[
+                                                 "min_pixels"] if "min_pixels" in self.tool_hparams.keys() else None,
+                                             max_pixels=self.tool_hparams[
+                                                 "max_pixels"] if "max_pixels" in self.tool_hparams.keys() else None,
+                                             bbox_type=bbox_type)
+            self.tool_dict = ZOOM_IN_RELATIVE
+
         elif self.name == "crop_image":
             self.callable_function = partial(crop_image,
                                              min_pixels=self.tool_hparams["min_pixels"] if "min_pixels" in self.tool_hparams.keys() else None,
@@ -252,7 +299,8 @@ class Tool:
         elif self.name == "crop_image_normalized":
             self.callable_function = partial(crop_image,
                                              min_pixels=self.tool_hparams["min_pixels"] if "min_pixels" in self.tool_hparams.keys() else None,
-                                             max_pixels=self.tool_hparams["max_pixels"] if "max_pixels" in self.tool_hparams.keys() else None)
+                                             max_pixels=self.tool_hparams["max_pixels"] if "max_pixels" in self.tool_hparams.keys() else None,
+                                             bbox_type=self.tool_hparams["bbox_type"] if "bbox_type" in self.tool_hparams.keys() else None)
             self.tool_dict = CROP_IMAGE
             self.tool_dict["function"]["name"] = "crop_image_normalized"
         elif self.name == "select_frames":
@@ -292,18 +340,7 @@ class Tool:
 
         input_height, input_width = get_resized_image_scales(img_y, img_x, self.tool_hparams["min_pixels"], self.tool_hparams["max_pixels"])
 
-        #if self.tool_hparams["min_pixels"] is None and self.tool_hparams["max_pixels"] is None:
-        #    input_height, input_width = img_y, img_x
-        #elif self.tool_hparams["min_pixels"] is None and self.tool_hparams["max_pixels"] is not None:
-        #    input_height, input_width = smart_resize(height=img_y, width=img_x,
-        #                                             max_pixels=self.tool_hparams["max_pixels"])
-        #elif self.tool_hparams["min_pixels"] is not None and self.tool_hparams["max_pixels"] is None:
-        #    input_height, input_width = smart_resize(height=img_y, width=img_x,
-        #                                             min_pixels=self.tool_hparams["min_pixels"])
-        #elif self.tool_hparams["min_pixels"] is not None and self.tool_hparams["max_pixels"] is not None:
-        #    input_height, input_width = smart_resize(height=img_y, width=img_x,
-        #                                             min_pixels=self.tool_hparams["min_pixels"],
-        #                                             max_pixels=self.tool_hparams["max_pixels"])
+
         message_args = tool_args.copy()
         message_args["width"] = input_width
         message_args["height"] = input_height
@@ -331,10 +368,33 @@ class Tool:
             "output_message": self.message.get_content(message_args),
         }
 
+def extract_tool(text:str, tool_start:str = TOOL_START, tool_end:str = TOOL_END, strict:bool = False, tool_start_position:str = "last"):
+    logger.info(f"text from which tool should be extracted: {text}")
 
-def extract_tool(text:str, tool_start:str = TOOL_START, tool_end:str = TOOL_END):
-    logger.info(f"extract tool: {text.split(tool_start)[-1].split(tool_end)[0]}")
-    return json.loads(text.split(tool_start)[-1].split(tool_end)[0])
+    no_tool_starts = text.count(tool_start)
+    logger.info(f"found {no_tool_starts} tool starts")
+
+    no_tool_ends = text.count(tool_end)
+    logger.info(f"found {no_tool_ends} tool ends")
+
+    ends_with_tool_end = text.endswith(tool_end)
+    logger.info(f"tool_end is at the end: {ends_with_tool_end}")
+
+    if strict:
+        assert no_tool_starts == 1, f"Tool call failed: there should be a single '{tool_start}', but found {no_tool_starts} instead"
+        assert no_tool_ends == 1, f"Tool call failed: there should be a single '{tool_end}', but found {no_tool_ends} instead"
+        assert ends_with_tool_end, f"Tool call failed: generated text should stop with '{tool_end}'"
+
+    if tool_start_position == "first":
+        after_tool_start = text.split(tool_start)[1]
+    elif tool_start_position == "last":
+        after_tool_start = text.split(tool_start)[-1]
+    else:
+        raise ValueError(f"tool_start_position {tool_start_position} not supported. choose from 'first', 'last'")
+    tool_content = after_tool_start.split(tool_end)[0]
+    logger.info(f"extracted tool: {tool_content}")
+
+    return json.loads(tool_content)
 
 
 
@@ -345,7 +405,8 @@ def show_image(image_path: str, **kwargs):
     """
     return image_path
 
-def zoom_in(image_path, bbox_2d, padding=(0.1,0.1), min_pixels=None, max_pixels=None):
+def zoom_in(image_path, bbox_2d, padding=(0.1,0.1), min_pixels=None, max_pixels=None, bbox_type:str=None,
+            adaptive_padding_threshold:int=600.0):
     """
     Crop the image based on the bounding box coordinates.
     """
@@ -354,36 +415,42 @@ def zoom_in(image_path, bbox_2d, padding=(0.1,0.1), min_pixels=None, max_pixels=
 
     input_height, input_width = get_resized_image_scales(img_y, img_x, min_pixels, max_pixels)
 
-    ## TODO: very unpythonic way, because smart_resize's default value is given by a global variable
-    #if min_pixels is None and max_pixels is None:
-    #    input_height, input_width = img_y, img_x
-    #elif min_pixels is None and max_pixels is not None:
-    #    input_height, input_width = smart_resize(height=img_y, width=img_x,
-    #                                             max_pixels=max_pixels)
-    #elif min_pixels is not None and max_pixels is None:
-    #    input_height, input_width = smart_resize(height=img_y, width=img_x,
-    #                                             min_pixels=min_pixels)
-    #elif min_pixels is not None and max_pixels is not None:
-    #    input_height, input_width = smart_resize(height=img_y, width=img_x,
-    #                                             min_pixels=min_pixels,
-    #                                             max_pixels=max_pixels)
+    logger.info(f"in zoom_in: original size: {img_x}x{img_y}")
+    logger.info(f"in zoom_in: small size: {input_width}x{input_height}")
 
-    logger.info(f"original size: {img_x}x{img_y}")
-    logger.info(f"small size: {input_width}x{input_height}")
+    if adaptive_padding_threshold is not None:
+        padding_tr = (adaptive_padding_threshold/input_width,adaptive_padding_threshold/input_height)
+        padding = (min(padding[0],padding_tr[0]),min(padding[1],padding_tr[1]))
 
-    padding_tr = (600.0/input_width,600.0/input_height)
-    padding = (min(padding[0],padding_tr[0]),min(padding[1],padding_tr[1]))
+    if bbox_type == "relative":
+        if bbox_2d[0] < 1 and bbox_2d[1] < 1 and bbox_2d[2] < 1 and bbox_2d[3] < 1:
+            normalized_bbox_2d = (float(bbox_2d[0])-padding[0],
+                                  float(bbox_2d[1])-padding[1],
+                                  float(bbox_2d[2])+padding[0],
+                                  float(bbox_2d[3])+padding[1])
+        else:
+            raise ValueError(f"Invalid bounding box coordinates: {bbox_2d}. They should be floating point values in [0,1].")
+    if bbox_type == "absolute":
+        if isinstance(bbox_2d[0], int) and isinstance(bbox_2d[1], int) and isinstance(bbox_2d[2], int) and isinstance(bbox_2d[3], int):
+            normalized_bbox_2d = (float(bbox_2d[0])/input_width-padding[0],
+                                  float(bbox_2d[1])/input_height-padding[1],
+                                  float(bbox_2d[2])/input_width+padding[0],
+                                  float(bbox_2d[3])/input_height+padding[1])
+        else:
+            raise ValueError(f"Invalid bounding box coordinates: {bbox_2d}. They should be integers >= 0.")
 
-    if bbox_2d[0] < 1 and bbox_2d[1] < 1 and bbox_2d[2] < 1 and bbox_2d[3] < 1:
-        normalized_bbox_2d = (float(bbox_2d[0])-padding[0],
-                              float(bbox_2d[1])-padding[1],
-                              float(bbox_2d[2])+padding[0],
-                              float(bbox_2d[3])+padding[1])
-    else:
-        normalized_bbox_2d = (float(bbox_2d[0])/input_width-padding[0],
-                              float(bbox_2d[1])/input_height-padding[1],
-                              float(bbox_2d[2])/input_width+padding[0],
-                              float(bbox_2d[3])/input_height+padding[1])
+    if bbox_type is None:
+        if bbox_2d[0] < 1 and bbox_2d[1] < 1 and bbox_2d[2] < 1 and bbox_2d[3] < 1:
+            normalized_bbox_2d = (float(bbox_2d[0])-padding[0],
+                                  float(bbox_2d[1])-padding[1],
+                                  float(bbox_2d[2])+padding[0],
+                                  float(bbox_2d[3])+padding[1])
+        else:
+            normalized_bbox_2d = (float(bbox_2d[0]) / input_width - padding[0],
+                                  float(bbox_2d[1]) / input_height - padding[1],
+                                  float(bbox_2d[2]) / input_width + padding[0],
+                                  float(bbox_2d[3]) / input_height + padding[1])
+
     normalized_x1, normalized_y1, normalized_x2, normalized_y2 = normalized_bbox_2d
     normalized_x1 =min(max(0, normalized_x1), 1)
     normalized_y1 =min(max(0, normalized_y1), 1)
@@ -406,20 +473,6 @@ def crop_image(image_path, bbox_2d, padding=0.1, min_pixels=None, max_pixels=Non
     img_x, img_y = image.size
 
     input_height, input_width = get_resized_image_scales(img_y, img_x, min_pixels, max_pixels)
-
-    ## TODO: very unpythonic way, because smart_resize's default value is given by a global variable
-    #if min_pixels is None and max_pixels is None:
-    #    input_height, input_width = img_y, img_x
-    #elif min_pixels is None and max_pixels is not None:
-    #    input_height, input_width = smart_resize(height=img_y, width=img_x,
-    #                                             max_pixels=max_pixels)
-    #elif min_pixels is not None and max_pixels is None:
-    #    input_height, input_width = smart_resize(height=img_y, width=img_x,
-    #                                             min_pixels=min_pixels)
-    #elif min_pixels is not None and max_pixels is not None:
-    #    input_height, input_width = smart_resize(height=img_y, width=img_x,
-    #                                             min_pixels=min_pixels,
-    #                                             max_pixels=max_pixels)
 
     if bbox_2d[0] < 1 and bbox_2d[1] < 1 and bbox_2d[2] < 1 and bbox_2d[3] < 1:
         normalized_bbox_2d = (float(bbox_2d[0])-padding,

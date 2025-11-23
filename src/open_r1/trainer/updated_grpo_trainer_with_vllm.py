@@ -281,6 +281,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         model: Union[str, PreTrainedModel],
         reward_funcs: Union[RewardFunc, list[RewardFunc]],
         reward_func_weights: list[float],
+        reward_func_usage: list[str],
         args: GRPOConfig = None,
         vlm_module: VLMBaseModule = None,
         train_dataset: Optional[Union[Dataset, IterableDataset]] = None,
@@ -303,7 +304,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         vllm_address: str = None,
         mi_masked_vision_forward_model: str = None,
         mi_full_forward_model: str = None,
-        mi_mask: str = None,
+        mi_mode: dict = None,
         scoring_batch_size_multiplier: int = 1,
         exploration_count: int = 0,
         exploration_pruning_schedule: dict = None,
@@ -332,7 +333,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         self.mi_masked_vision_forward_model = mi_masked_vision_forward_model
         self.mi_full_forward_model = mi_full_forward_model
-        self.mi_mask = get_processing(mi_mask)
+        self.mi_mode = mi_mode
 
         self.scoring_batch_size_multiplier = scoring_batch_size_multiplier
 
@@ -507,7 +508,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         self.use_vllm = args.use_vllm
 
         self.multi_turn = multi_turn
-        if self.multi_turn == "none":
+        if self.multi_turn == "none" or self.multi_turn == "None":
             self.multi_turn = None
 
         # Multi-step
@@ -547,6 +548,12 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         self.reward_func_weights = torch.tensor(reward_func_weights, dtype=torch.float16,
                                                 device=self.accelerator.device)
+        self.reward_funcs_for_reward = torch.zeros_like(self.reward_func_weights)
+        self.reward_funcs_for_reward[[idx for idx, usage in enumerate(reward_func_usage) if
+                                        usage in ["both", "reward"]]] = 1
+        self.reward_funcs_for_sampling_weights = torch.zeros_like(self.reward_func_weights)
+        self.reward_funcs_for_sampling_weights[[idx for idx, usage in enumerate(reward_func_usage) if
+                                      usage in ["both", "sampling_weights"]]] = 1
 
         # Check if the per_device_train/eval_batch_size * num processes can be divided by the number of generations
         num_processes = self.accelerator.num_processes
@@ -716,18 +723,12 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         generate_every = self.args.steps_per_generation * self.num_iterations
         logger.info(f"generate_every: {generate_every}")
         logger.info(f"self._step: {self._step}")
-        #logger.info(f"in prepare inputs: generation_batch: {}")
         if self._step % generate_every == 0 or self.buffer.buffer_space_taken() == 0:
             # self._buffered_inputs=None can occur when resuming from a checkpoint
             generation_batch = self._generate_and_score_completions(generation_batch, self.model)
             logger.info(f"generation_batch after generate: {generation_batch['prompt_ids'].shape}")
-            #self.monitor_gpu_usage("prepare inputs: after generation")
             self.buffer.add(generation_batch, padding_side="right")
-            #self.monitor_gpu_usage("prepare inputs: after add to buffer")
-            #generation_batch = split_pixel_values_by_grid(generation_batch)
-            #generation_batch = shuffle_sequence_dict(generation_batch)
-            #generation_batches = split_tensor_dict(generation_batch, self.args.steps_per_generation)
-            # self._buffered_inputs = [unsplit_pixel_values_by_grid(batch) for batch in generation_batches]
+
         inputs = self.buffer.get(batch_size=self.args.per_device_train_batch_size, deterministic=False,
                                  device=self.accelerator.device if self.buffer.cpu_buffer else None,
                                  padding_side="right")
@@ -775,17 +776,21 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         if self._signature_columns is None:
             self._signature_columns = ["prompt"]
 
-    def _get_per_token_logps_new(self, model, input_ids, attention_mask, image_grid_thw, pixel_values, num_images,
-                                 batch_size, disable_dropout):
+    def _get_per_token_logps(self, model, input_ids, attention_mask, image_grid_thw, pixel_values, num_images,
+                                 batch_size, disable_dropout, return_entropies) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        # the returned entropies have the same dimensionality as the returned logps, seq_len(input_ids) - 1. The code could be extended to allow for
+        # calculation of the uncertainty in generating the next token (whose true label we don't know).
+        # Then the entropies had the same dimensionality as input_ids
         if disable_dropout:
             model.eval()
         max_len = input_ids.size(1)
         #logger.info(f"max_len: {max_len}")
         logp_target_len = max_len - 1
         batch_size = batch_size or input_ids.size(0)  # Chunk inputs into smaller batches to reduce memory peak
-        logger.info(f"_get_per_token_logps_new: batch size: {batch_size}")
-        logger.info(f"_get_per_token_logps_new: inputs_ids_size: {input_ids.size(0)}")
+        logger.info(f"_get_per_token_logps: batch size: {batch_size}")
+        logger.info(f"_get_per_token_logps: inputs_ids_size: {input_ids.size(0)}")
         all_logps = []
+        all_entropies = []
         for start in range(0, input_ids.size(0), batch_size):
             input_ids_batch = input_ids[start: start + batch_size]
             attention_mask_batch = attention_mask[start: start + batch_size]
@@ -811,30 +816,46 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             elif pixel_values is not None:
                 model_inputs["pixel_values"] = pixel_values[start: start + batch_size]
 
-
+            logger.info(f"_get_per_token_logps: directly before forward pass")
             logits = model(**model_inputs).logits
+            logger.info(f"_get_per_token_logps: directly after forward pass")
 
             logits = logits[:, :-1, :]  # (B, L-1, V), exclude the last logit: it corresponds to the next token pred
             input_ids_batch = input_ids_batch[:, 1:]  # (B, L-1), exclude the first input ID since we don't have logits for it
             # Compute the log probabilities for the input tokens. Use a loop to reduce memory peak.
             per_token_logps = []
+            per_token_entropies = []
             for logits_row, input_ids_row in zip(logits, input_ids_batch):
                 log_probs = logits_row.log_softmax(dim=-1)
                 token_log_prob = torch.gather(log_probs, dim=1, index=input_ids_row.unsqueeze(1)).squeeze(1)
                 per_token_logps.append(token_log_prob)
+
+                if return_entropies:
+                    per_token_entropy = -(log_probs.exp() * log_probs).sum(dim=-1)
+                    per_token_entropies.append(per_token_entropy)
+
             chunk_logps = torch.stack(per_token_logps)
+            if return_entropies:
+                chunk_entropies = torch.stack(per_token_entropies)
             #logger.info(f"chunk_logps before re-pad: {chunk_logps.size(1)}")
             if chunk_logps.size(1) < logp_target_len:
                 pad_len = logp_target_len - chunk_logps.size(1)
                 chunk_logps = torch.nn.functional.pad(chunk_logps, (0, pad_len), value=0.0)
+                if return_entropies:
+                    chunk_entropies = torch.nn.functional.pad(chunk_entropies, (0, pad_len), value=0.0)
             #logger.info(f"chunk_logps after re-pad: {chunk_logps.size(1)}")
             all_logps.append(chunk_logps)
+            if return_entropies:
+                all_entropies.append(chunk_entropies)
 
 
         if disable_dropout:
             model.train()
 
-        return torch.cat(all_logps, dim=0)
+        if return_entropies:
+            return torch.cat(all_logps, dim=0), torch.cat(all_entropies, dim=0)
+        else:
+            return torch.cat(all_logps, dim=0), None
 
     @profiling_decorator
     def _move_model_to_vllm(self):
@@ -906,11 +927,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         tool_dicts = [tool.get_tool_dict() for tool in self.tools] if self.tools is not None else None
         logger.info(f"in _generate_and_score_completions: tools: {tool_dicts}")
 
-        #logger.info(f"prompts: {prompts}")
-        #prompts_text = self.vlm_module.prepare_prompt(self.processing_class, inputs,
-        #                                              tools=tool_dicts)
-        #logger.info(f"prompts_text: {prompts_text}")
-        #logger.info(f"prompts_text: {prompts_text}")
+
         # Handle both pre-loaded images and image paths
         image_paths = []
         for x in inputs:
@@ -920,9 +937,6 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                 assert len(self._get_key_from_inputs(x, "image_path")) == 1, f"Example {x} contains more than one image which is not supported atm"
             else:
                 raise ValueError(f"sample {x} does not contain any image path")
-
-        ignore_user_reply_for_loss = True
-
 
         # First, have main process load weights if needed
         if self.state.global_step != self._last_loaded_step:
@@ -934,7 +948,6 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         # Generate completions using vLLM: gather all prompts and use them in a single call in the main process
         all_histories = gather_object(history)
-        #all_prompts_text = gather_object(prompts_text)
         all_image_paths = gather_object(image_paths)
 
         if self.accelerator.is_main_process:
@@ -942,18 +955,11 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             # Since 'prompts' contains 'num_generations' duplicates, we first take unique prompts, and generate
             # num_generations outputs for each one. This is faster than generating outputs for each duplicate
             # prompt individually.
-            #ordered_set_of_histories = all_histories[:: self.num_generations]
-            #ordered_set_of_prompts = all_prompts_text[:: self.num_generations]
+
             ordered_set_of_image_paths = all_image_paths[:: self.num_generations]
-            #all_multimodal_inputs = [
-            #    {"prompt": p, "image_path": i}
-            #    for p, i in zip(ordered_set_of_prompts, ordered_set_of_image_paths)
-            #]
-            #logger.info(f"all multimodal inputs: {all_multimodal_inputs}")
 
             no_conversations = len(all_histories)
 
-            #conversations = Conversations(no_conversations)
             multi_turn_manager = MultiTurn(no_conversations,
                                    processor=self.processing_class,
                                    tools=self.tools)
@@ -970,38 +976,19 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
             logger.info(f"all_multimodal_token_inputs: {all_multimodal_token_inputs}")
 
-            #multi_turn_manager.check(all_multimodal_inputs, all_multimodal_token_inputs, input_text)
-
-            #for idx in range(no_conversations):
-            #    mod_idx = idx // self.num_generations
-            #    conversations.add_message(
-            #        Prompt(pre_tokenizer_format=copy.deepcopy(ordered_set_of_histories[mod_idx]["prompt"][0]),
-            #               image_path=ordered_set_of_image_paths[mod_idx]), idx)
-
             conv_round = 0
             max_conv_rounds = 5 # just for safety that we don't get stuck in endless loop. max tool calls should prevent it
 
             max_generation_attempts = 5
 
             while not all(multi_turn_manager.is_finished) and conv_round < max_conv_rounds:
-
+                #logger.info(f"state of mt_manager before generation {conv_round}: {multi_turn_manager.all_multi_turn}")
                 t_vllm = time.time()
                 with profiling_context(self, "vLLM.generate"):
                     vllm_generation_has_worked = False
                     attempts = 0
                     while (not vllm_generation_has_worked) and (attempts <= max_generation_attempts):
                         try:
-                            #completion_ids = self.vllm_client.generate_from_multimodal_input(
-                            #    prompts=all_multimodal_inputs,
-                            #    n=self.num_generations if conv_round == 0 else 1,
-                            #    repetition_penalty=self.repetition_penalty,
-                            #    temperature=self.temperature,
-                            #    top_p=self.top_p,
-                            #    top_k=-1 if self.top_k is None else self.top_k,
-                            #    min_p=0.0 if self.min_p is None else self.min_p,
-                            #    max_tokens=self.max_completion_length,
-                            #    guided_decoding_regex=self.guided_decoding_regex,
-                            #)
                             completion_ids_token_based = self.vllm_client.generate_from_multimodal_token_input(
                                 prompts=all_multimodal_token_inputs,
                                 n=self.num_generations if conv_round == 0 else 1,
@@ -1025,17 +1012,12 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                 t_vllm_end = time.time()
                 self._metrics["vllm_generate_time"].append(t_vllm_end - t_vllm)
                 #logger.info(f"completion_ids: {completion_ids}")
-                #completions = self.processing_class.batch_decode(completion_ids, skip_special_tokens=True)
                 #logger.info(f"completions from conv round {conv_round}: {completions}")
                 completions_token_based = self.processing_class.batch_decode(completion_ids_token_based, skip_special_tokens=True)
                 logger.info(f"completions from conv round {conv_round}: {completions_token_based}")
+                logger.info(f"completion_ids from conv round {conv_round}: {completion_ids_token_based}")
 
                 completion_idx = 0
-                #for idx in range(no_conversations):
-                #    if not conversations.is_finished[idx]:
-                #        conversations.add_message(
-                #            Prompt(content=[{'text': completions[completion_idx], 'type': 'text'}], role="assistant"), idx)
-                #        completion_idx += 1
 
                 multi_turn_manager.add_model_reply(completion_ids_token_based, mapping=multi_turn_manager.get_ids(is_finished=False))
 
@@ -1045,11 +1027,6 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                 elif self.multi_turn == "text":
                     text_rethink = "Are you sure? Think again. "
                     if conv_round == 0:
-                        #for idx in range(no_conversations):
-                        #    conversations.add_message(Prompt(content=[{'text': text_rethink + format_prompt,
-                        #                                       'type': 'text'}],
-                        #                             role="user"),
-                        #                      idx)
                         multi_turn_manager.add_user_message(texts=[text_rethink + format_prompt for _ in range(no_conversations)])
                     else:
                         #conversations.is_finished = [True] * no_conversations
@@ -1057,13 +1034,6 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                 elif self.multi_turn == "image":
                     image_rethink = "Are you sure? Look at the image again. "
                     if conv_round == 0:
-                        #for idx in range(no_conversations):
-                        #    conversations.add_message(Prompt(content=[{"text": None, "type": "image"},
-                        #                                      {'text': image_rethink + format_prompt,
-                        #                                       'type': 'text'}],
-                        #                             role="user",
-                        #                             image_path=conversations.get_image_paths()[idx][0]),
-                        #                      idx)
                         multi_turn_manager.add_user_message(prompts=[{
                                                             'role': 'user',
                                                             'content': [
@@ -1076,27 +1046,15 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                         #conversations.is_finished = [True] * no_conversations
                         multi_turn_manager.is_finished = [True for _ in range(no_conversations)]
                 elif self.multi_turn == "tool":
-                    #conversations.handle_tool_call(save_path=os.path.join(self.save_path, "tool_calls"),
-                    #                               step=self.state.global_step,
-                    #                               tools=self.tools
-                    #                               )
                     multi_turn_manager.handle_tool_call(save_path=os.path.join(self.save_path, "tool_calls"),
                                                    step=self.state.global_step)
-
-                    #for idx in range(no_conversations):
-                    #    if self.max_tool_uses is not None and conversations.get_no_tool_calls(idx) > self.max_tool_uses:
-                    #        conversations.is_finished[idx] = True
 
                     for idx in range(no_conversations):
                         if self.max_tool_uses is not None and multi_turn_manager.get_no_tool_calls(idx) > self.max_tool_uses:
                             multi_turn_manager.is_finished[idx] = True
+                else:
+                    raise ValueError(f"Invalid value for multi_turn: {self.multi_turn}. Choose from None, 'text', 'image', or 'tool'")
 
-
-
-                #full_conversations_concat = self.vlm_module.prepare_prompt(self.processing_class,
-                #                                                           conversations.get_full_for_hf_prep(
-                #                                                               ignore_finished=True),
-                #                                                           tools=tool_dicts)
 
                 full_token_seq = multi_turn_manager.get_sequences(type="id", add_assistant_start=True, full_image_pad=False, ignore_finished=True)
                 logger.info(f"full_token_seq: {full_token_seq}")
@@ -1109,33 +1067,16 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                                                 "image_path": image_paths[i]}
                                                for i in range(len(image_paths))]
 
-                # logger.info(f"full conversations: {full_conversations_concat}")
-                #all_multimodal_inputs = [
-                #    {"prompt": p, "image_path": i}
-                #    for p, i in zip(full_conversations_concat, conversations.get_image_paths(ignore_finished=True))
-                #]
-                #multi_turn_manager.check(all_multimodal_inputs, all_multimodal_token_inputs, input_text)
-                #logger.info(f"all_multimodal_inputs: {all_multimodal_inputs}")
                 conv_round += 1
                 logger.info(f"all_multimodal_token_inputs for conv_round {conv_round}: {all_multimodal_token_inputs}")
-
-
-
-            #all_image_paths = conversations.get_image_paths()
-            #full_generations = self.vlm_module.prepare_prompt(self.processing_class,
-            #                                                  conversations.get_full_for_hf_prep(),
-            #                                                  tools=tool_dicts)
-            #model_generations = conversations.get_model_generations()
+                #logger.info(f"state of mt_manager for conv_round {conv_round}: {multi_turn_manager.all_multi_turn}")
 
             all_multi_turn = multi_turn_manager.all_multi_turn
 
-            #overall_tools_used = np.array([conversations.get_no_tool_calls(idx) for idx in range(no_conversations)])
-            #overall_tools_used = [conversations.get_no_tool_calls(idx) for idx in range(no_conversations)]
             overall_tools_used = [multi_turn_manager.get_no_tool_calls(idx) for idx in range(no_conversations)]
-            #attempted_tool_uses = [conversations.get_attempted_tool_calls(idx) for idx in range(no_conversations)]
+
             attempted_tool_uses = [multi_turn_manager.get_no_tool_calls(idx, type="attempt") for idx in range(no_conversations)]
-            #overall_tools_used = torch.tensor([conversations.get_no_tool_calls(idx) for idx in range(no_conversations)],
-            #                                  dtype=torch.float, device=self.accelerator.device)
+
             logger.info(f"overall_tools_used: {overall_tools_used}")
             tool_use_array = np.array(overall_tools_used, dtype=np.float16)
             tool_attempt_array = np.array(attempted_tool_uses, dtype=np.float16)
@@ -1151,28 +1092,20 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                 self._metrics["tool_success_rate"].append(float(np.mean(tool_use_array[attempts_mask] / tool_attempt_array[attempts_mask])))
             else:
                 self._metrics["tool_success_rate"].append(-1.0)
-            #logger.info(f"full generations: {full_generations}")
-            #logger.info(f"model_generations: {model_generations}")
+
             t3 = time.time()
             self._metrics["generate_time"].append(t3 - t2)
         else:
             all_multi_turn = [None] * len(all_histories)
-            #full_generations = [None] * len(all_histories)
-            #model_generations = [None] * len(all_histories)
-            #model_generated_boundaries = [None] * len(all_prompts_text)
-            #all_image_paths = [None] * len(all_histories)
+
             overall_tools_used = [None] * len(all_histories)
 
         #logger.info(f"({rank}) Completion ids: {[len(lst) if lst is not None else 0 for lst in completion_ids]}")
         # Broadcast the completions from the main process to all processes, ensuring each process receives its
         # corresponding slice.
 
-        # TODO: is it better to tokenize globally or distributed?
-        #logger.info(f"Before full_generations broadcast: {full_generations}")
-        #full_generations = broadcast_object_list(full_generations, from_process=0)
-        #logger.info(f"Before model_generations broadcast: {model_generations}")
-        #model_generations = broadcast_object_list(model_generations, from_process=0)
-        #logger.info(f"Before all_image_paths broadcast: {all_image_paths}")
+
+
         all_image_paths = broadcast_object_list(all_image_paths, from_process=0)
         #logger.info(f"Before overall_tools_used broadcast: {overall_tools_used}")
         overall_tools_used = broadcast_object_list(overall_tools_used, from_process=0)
@@ -1185,10 +1118,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             self.accelerator.process_index * len(prompts),
             (self.accelerator.process_index + 1) * len(prompts),
         )
-        #full_generations = full_generations[process_slice]
-        #model_generations = model_generations[process_slice]
-        #all_image_paths = all_image_paths[process_slice]
-        #sliced_tool_use = overall_tools_used[process_slice]
+
 
 
         all_multi_turn = all_multi_turn[process_slice]
@@ -1197,7 +1127,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                                        tools=None)
         multi_turn_manager.all_multi_turn = all_multi_turn
 
-        logger.info(f"multi_turn_manager after split: {multi_turn_manager.all_multi_turn}")
+        #logger.info(f"multi_turn_manager after split: {multi_turn_manager.all_multi_turn}")
 
         all_image_paths = multi_turn_manager.get_image_paths(flatten=False)
 
@@ -1207,44 +1137,12 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         #logger.info(f"after image path")
 
-        #for image_path in image_paths_flatten:
-        #    img = PIL.Image.open(image_path)
 
-        #    try:
-        #        # Ensure minimum dimensions of 28 pixels
-        #        w, h = img.size
-        #        if w < 28 or h < 28:
-        #        # Calculate new dimensions maintaining aspect ratio
-        #            if w < h:
-        #                new_w = 28
-        #                new_h = int(h * (28/w))
-        #            else:
-        #                new_h = 28
-        #                new_w = int(w * (28/h))
-        #            img = img.resize((new_w, new_h), PIL.Image.Resampling.LANCZOS)
-        #    except Exception as e:
-        #        logger.info(f"Warning: could not process image {image_path}: {e}")
-        #    images.append(img)
-
-
-        #hf_inputs = self.processing_class(
-        #    text=full_generations.copy(),
-        #    images=images,
-        #    return_tensors="pt",
-        #    padding=True,
-        #    padding_side="right",
-        #    add_special_tokens=False,
-        #    return_offsets_mapping=False
-        #)
-
-
-        #prompt_inputs = super()._prepare_inputs(hf_inputs)
-
-        #prompt_ids, prompt_mask = prompt_inputs["input_ids"], prompt_inputs["attention_mask"]
 
 
         prompt_ids_new = multi_turn_manager.get_sequences(type="id", add_assistant_start=False, full_image_pad=True)
-        logger.info(f"prompt_ids_new before pad: {[len(s) for s in prompt_ids_new]}")
+        logger.info(f"prompt_ids_new_lens before pad: {[len(s) for s in prompt_ids_new]}")
+        logger.info(f"prompt_ids_new before pad: {prompt_ids_new}")
         prompt_mask_new = [[1 for _ in seq] for seq in prompt_ids_new]
         logger.info(f"prompt_mask_new before pad: {[len(s) for s in prompt_mask_new]}")
         prompt_ids_new = pad(prompt_ids_new, padding_side='right', padding_value=self.processing_class.pad_token_id)
@@ -1268,17 +1166,9 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         prompt_ids = prompt_inputs["input_ids"]
         prompt_mask = prompt_inputs["attention_mask"]
 
-        #initial_mask = torch.ones_like(prompt_mask, device=device, dtype=torch.bool)
 
         logger.info("before everything_except_model_generation mask")
-        #parser_input = hf_inputs.copy()
-        #parser = ParsedTokenized(parser_input["input_ids"],
-        #                         parser_input["attention_mask"],
-        #                         parser_input["image_grid_thw"],
-        #                         parser_input["pixel_values"],
-        #                         verbose=True)
 
-        #logger.info(parser.parsed)
 
         non_generation_mask_new = multi_turn_manager.get_mask(type="everything_except_model_generation")
         logger.info(f"non_generation mask: {[len(s) for s in non_generation_mask_new]}")
@@ -1287,9 +1177,6 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         non_generation_mask = torch.tensor(non_generation_mask_new, device=device, dtype=torch.int8)
 
-        #non_generation_mask = parser.get_mask(mode="everything_except_model_generation",
-        #                       mask=initial_mask,
-        #                       indices=None)
 
         if (non_generation_mask.sum(dim=1) == 0).any():
             logger.info(f"non_generation_mask contains row of zeroes!")
@@ -1299,8 +1186,8 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         if "mutual_information" in [rf["name"] for rf in self.reward_funcs]:
             use_mi_reward = True
 
-            if self.mi_mask is None:
-                raise ValueError(f"To use MI you need to specify a mask!")
+            if self.mi_mode is None:
+                raise ValueError(f"To use MI you need to specify what and how to mask!")
 
             if self.mi_masked_vision_forward_model == "self":
                 mi_masked_vision_forward_model = model
@@ -1324,15 +1211,13 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             if self.num_iterations > 1:
                 #logger.info("before old_per_token_logps calculation")
                 if use_mi_reward:
-                    old_per_token_logps = self._get_per_token_logps_new(model, prompt_ids, prompt_mask,
+                    old_per_token_logps, old_per_token_entropies = self._get_per_token_logps(model, prompt_ids, prompt_mask,
                                                   image_grid_thw=multimodal_inputs["image_grid_thw"],
                                                   pixel_values=multimodal_inputs["pixel_values"],
                                                   num_images=images_per_sample,
                                                   batch_size=self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier,
-                                                  disable_dropout=True)
-                    #old_per_token_logps = self._get_per_token_logps_without_dropout( #
-                    #    model, prompt_ids, prompt_mask, **multimodal_inputs
-                    #)
+                                                  disable_dropout=True, return_entropies=True)
+
                     if torch.isnan(old_per_token_logps).any():
                         logger.info(f"old_per_token_logps contains nan! {old_per_token_logps}")
                         logger.info(f"prompt_ids: {prompt_ids}")
@@ -1342,17 +1227,15 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
                 else:
                     logger.info(f"in old_per_token_logps: images_per_sample:  {images_per_sample}")
-                    old_per_token_logps = self._get_per_token_logps_new(model, prompt_ids, prompt_mask,
+                    old_per_token_logps, old_per_token_entropies = self._get_per_token_logps(model, prompt_ids, prompt_mask,
                                                   image_grid_thw = multimodal_inputs["image_grid_thw"],
                                                   pixel_values = multimodal_inputs["pixel_values"],
                                                   num_images = images_per_sample,
                                                   batch_size = self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier,
-                                                  disable_dropout=True)
-                    #old_per_token_logps = self._get_per_token_logps(
-                    #    model, prompt_ids, prompt_mask, **multimodal_inputs,
-                    #)
+                                                  disable_dropout=True, return_entropies=True)
+
                 #logger.info("after old_per_token_logps calculation")
-                #old_per_token_logps = old_per_token_logps[:, prompt_length - 1:]
+
             else:
                 #logger.info(f"set old_per_token_logps to None")
                 old_per_token_logps = None
@@ -1364,111 +1247,126 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                 logger.info("before ref_per_token_logps calculation with frozen model")
                 #logger.info(f"rank: {rank}: directly before ref per token logps calculation")
 
-                ref_per_token_logps = self._get_per_token_logps_new(self.ref_model, prompt_ids, prompt_mask,
+                ref_per_token_logps, ref_per_token_entropies = self._get_per_token_logps(self.ref_model, prompt_ids, prompt_mask,
                                               image_grid_thw=multimodal_inputs["image_grid_thw"],
                                               pixel_values=multimodal_inputs["pixel_values"],
                                               num_images=images_per_sample,
                                               batch_size=self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier,
-                                              disable_dropout=True)
+                                              disable_dropout=True, return_entropies=True)
 
-                #ref_per_token_logps = self._get_per_token_logps(
-                #    self.ref_model, prompt_ids, prompt_mask, **multimodal_inputs
-                #)
+
                 #logger.info("after ref_per_token_logps calculation")
             else:
                 #logger.info("before unwrap model!")
                 logger.info("before ref_per_token_logps calculation with live model")
                 with self.accelerator.unwrap_model(model).disable_adapter():
-                    ref_per_token_logps = self._get_per_token_logps_new(model, prompt_ids, prompt_mask,
+                    ref_per_token_logps, ref_per_token_entropies = self._get_per_token_logps(model, prompt_ids, prompt_mask,
                                                                         image_grid_thw=multimodal_inputs[
                                                                             "image_grid_thw"],
                                                                         pixel_values=multimodal_inputs["pixel_values"],
                                                                         num_images=images_per_sample,
                                                                         batch_size=self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier,
-                                                                        disable_dropout=True)
+                                                                        disable_dropout=True, return_entropies=True)
                 #logger.info("after ref_per_token_logps calculation with actual model")
 
             contrasted_area = None
             diff = None
+            contrast_diff_list = None
 
             if use_mi_reward:
 
-                shorten_tokenized = parser.get_shortened_tokenized(self.mi_mask, self.processing_class.pad_token_id,
-                                                                   device=device, padding_side="right"
-                                                                   )
+                input_ids_mi, image_positions_mi, reduced_images_per_sample, considered_seqs = multi_turn_manager.get_shortened_sequences(
+                    remove=self.mi_mode["remove"], contrasted_area=self.mi_mode["contrasted_area"], bridge=self.mi_mode["bridge"])
 
-                contrasted_area = parser.get_model_response(1)
+                mask_mi = [[1 for _ in seq] for seq in input_ids_mi]
+                logger.info(f"mask_mi before pad: {[len(s) for s in mask_mi]}")
 
-                short_prompt_ids = shorten_tokenized["input_ids"]
-                short_prompt_mask = shorten_tokenized["attention_mask"]
-                short_multimodal_inputs = {"image_grid_thw": shorten_tokenized["image_grid_thw"],
-                                           "pixel_values": shorten_tokenized["pixel_values"]}
+                input_ids_mi = pad(input_ids_mi, padding_side='right', padding_value=self.processing_class.pad_token_id)
+                logger.info(f"prompt_ids_mi after pad: {[len(s) for s in input_ids_mi]}")
 
-                enlarged_short_prompt_ids = torch.ones_like(prompt_ids) * self.processing_class.pad_token_id
-                enlarged_short_prompt_ids[:, :short_prompt_ids.size(1)] = short_prompt_ids
+                mask_mi = pad(mask_mi, padding_side='right', padding_value=0)
+                logger.info(f"prompt_mask_new after pad: {[len(s) for s in mask_mi]}")
 
-                enlarged_short_attention_mask = torch.zeros_like(prompt_mask)
-                enlarged_short_attention_mask[:, :short_prompt_mask.size(1)] = short_prompt_mask
+                pixel_values_mi = multi_turn_manager.get_multimodal(type="pixel_values", positions=image_positions_mi)
+                image_grid_thw_mi = multi_turn_manager.get_multimodal(type="image_grid_thw",
+                                                                      positions=image_positions_mi)
 
-                reduced_images_per_sample = reduce_img_per_sample(images_per_sample, shorten_tokenized["masked_image_indices"])
+                inputs_mi = {"input_ids": torch.tensor(input_ids_mi, dtype=torch.long, device=device),
+                             "attention_mask": torch.tensor(mask_mi, dtype=torch.long, device=device),
+                             "image_grid_thw": torch.tensor(image_grid_thw_mi, dtype=torch.long, device=device),
+                             "pixel_values": torch.tensor(pixel_values_mi, dtype=torch.bfloat16, device=device)}
 
-                vision_masked_per_token_logps = self._get_per_token_logps_new(mi_masked_vision_forward_model,
-                                                                              enlarged_short_prompt_ids,
-                                                                              enlarged_short_attention_mask,
-                                          image_grid_thw=short_multimodal_inputs["image_grid_thw"],
-                                          pixel_values=short_multimodal_inputs["pixel_values"],
+                mi_batch_size = self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier
+
+                #if mi_batch_size > len(input_ids_mi):
+                #    mi_batch_size = len(input_ids_mi)
+                #else:
+                #    while len(input_ids_mi) % mi_batch_size != 0:
+                #        mi_batch_size -= 1
+
+                logger.info(f"mi_batch_size: {mi_batch_size}")
+
+                vision_masked_per_token_logps, vision_masked_per_token_entropies = self._get_per_token_logps(mi_masked_vision_forward_model,
+                                                                              input_ids=inputs_mi["input_ids"],
+                                                                              attention_mask = inputs_mi["attention_mask"],
+                                          image_grid_thw=inputs_mi["image_grid_thw"],
+                                          pixel_values=inputs_mi["pixel_values"],
                                           num_images=reduced_images_per_sample,
-                                          batch_size=self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier,
-                                          disable_dropout=True)[:, :short_prompt_ids.size(1)-1]
-                #shorten_tokenized
-                indices = shorten_tokenized["indices"]
-                indices[indices >= 0] -= 1
-                logp_indices = indices[:, 1:]
+                                          batch_size=mi_batch_size,
+                                          disable_dropout=True, return_entropies=True)
 
-                logger.info(f"masked_logps: {vision_masked_per_token_logps}")
-                #logger.info(f"masked_logps: {vision_masked_per_token_logps.shape}")
-
-                logger.info(f"logp indices: {logp_indices}")
-
-                rescaled_masked_logps = rescale(vision_masked_per_token_logps, logp_indices,
-                                                hf_inputs["input_ids"][:, 1:], hf_inputs["attention_mask"][:, 1:],
-                                                pad_token_id=-1.0875e+01)
-
-                logger.info(f"rescaled_masked_logps: {rescaled_masked_logps}")
-                #logger.info(f"rescaled_masked_logps: {rescaled_masked_logps.shape}")
-
-                logger.info(f"old_per_token_logps: {old_per_token_logps}")
-                #logger.info(f"old_per_token_logps: {old_per_token_logps.shape}")
-
+                if self.mi_mode["contrasted_score"] == "entropy":
+                    vision_masked_per_token_score = -vision_masked_per_token_entropies
+                elif self.mi_mode["contrasted_score"] == "log_probs":
+                    vision_masked_per_token_score = vision_masked_per_token_logps
+                else:
+                    raise ValueError(
+                        f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. Choose from ['entropy', 'log_probs']")
 
                 if self.mi_full_forward_model == "self":
-                    full_forward_logps = old_per_token_logps
+                    if self.mi_mode["contrasted_score"] == "entropy":
+                        full_forward_score = -old_per_token_entropies
+                    elif self.mi_mode["contrasted_score"] == "log_probs":
+                        full_forward_score = old_per_token_logps
+                    else:
+                        raise ValueError(f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. Choose from ['entropy', 'log_probs']")
                 elif self.mi_full_forward_model == "reference":
-                    full_forward_logps = ref_per_token_logps
+                    if self.mi_mode["contrasted_score"] == "entropy":
+                        full_forward_score = -ref_per_token_entropies
+                    elif self.mi_mode["contrasted_score"] == "log_probs":
+                        full_forward_score = ref_per_token_logps
+                    else:
+                        raise ValueError(
+                            f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. Choose from ['entropy', 'log_probs']")
                 else:
                     raise ValueError("mi_full_forward_model must be 'self' or 'reference'")
 
-                # absolute diff
-                diff = full_forward_logps - rescaled_masked_logps # diff should be positive!
+                logger.info(f"masked_score: {vision_masked_per_token_score}")
 
-                # relative diff
-                #denominator = torch.maximum(torch.abs(old_per_token_logps), torch.abs(rescaled_masked_logps))
-                #diff = torch.where(denominator == 0, 0, (old_per_token_logps - rescaled_masked_logps) / denominator)
+                logger.info(f"full_score: {full_forward_score}")
 
-                logger.info(f"diff: {diff}")
+                contrast_diff_list = []
+                for idx in range(full_forward_score.shape[0]):
+                    if not considered_seqs[idx]["dummy"]:
+                        contrasted_area = considered_seqs[idx]["contrasted_area"]
+                        contrasted_area_short = considered_seqs[idx]["contrasted_area_short"]
 
-                for i in range(len(shorten_tokenized["mask_intervals_ignoring_padding"])):
+                        logger.info(f"contrasted_area: {contrasted_area}")
+                        logger.info(f"contrasted_area_short: {contrasted_area_short}")
 
-                    if len(contrasted_area[i]) > 0:
-                        start_contrast = contrasted_area[i][0][0] - 1
-                        end_contrast = contrasted_area[i][0][1] - 1
+                        assert contrasted_area[0] > 0
+                        assert contrasted_area[1] > contrasted_area[0]
+                        assert contrasted_area_short[0] > 0
+                        assert contrasted_area_short[1] > contrasted_area_short[0]
 
-                        logger.info(f"start contrast: {start_contrast}, end contrast: {end_contrast}")
-                        #logger.info(f"rescaled_masked_logps in contrasted area: {rescaled_masked_logps[i, start_contrast:end_contrast]}")
-                        #logger.info(f"old_per_token_logps in contrasted area: {old_per_token_logps[i, start_contrast:end_contrast]}")
-                        contrast_diff = diff[i, start_contrast:end_contrast]
+                        contrast_diff = (full_forward_score[idx, contrasted_area[0] - 1: contrasted_area[1] - 1] -
+                                         vision_masked_per_token_score[
+                                             idx, contrasted_area_short[0] - 1: contrasted_area_short[1] - 1])
+
+                        contrast_diff_list.append(contrast_diff.detach())
+
                         if contrast_diff.numel() != 0:
-                            #logger.info(f"diff in contrasted area: {contrast_diff}")
+                            # logger.info(f"diff in contrasted area: {contrast_diff}")
                             logger.info(f"contrast diff mean: {torch.mean(contrast_diff)}")
                             logger.info(f"contrast diff max: {torch.max(contrast_diff)}")
                             logger.info(f"contrast diff min: {torch.min(contrast_diff)}")
@@ -1483,14 +1381,13 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
                         else:
                             logger.info(f"contrast diff contains no elements!")
-
                     else:
-                        logger.info("no contrast needed")
+                        contrast_diff_list.append(None)
 
         t5 = time.time()
         self._metrics["score_time"].append(t5 - t4)
 
-        model_generations = multi_turn_manager.get_model_generations()
+        model_generations = multi_turn_manager.get_model_generations(type="text")
 
         logger.info(f"model_generations for reward calculation: {model_generations}")
 
@@ -1508,8 +1405,6 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         # Compute the rewards
         # No need to duplicate prompts as we're not generating multiple completions per prompt
 
-
-
         overall_tools_used = torch.tensor(overall_tools_used, dtype=torch.float16, device=device)
         completion_rewards_per_func = torch.zeros(len(prompts), len(self.reward_funcs_per_completion), device=device)
         for i, (reward_func, reward_processing_class) in enumerate(
@@ -1525,28 +1420,20 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                         # No need to duplicate prompts as we're not generating multiple completions per prompt
                         # reward_kwargs[key].extend([example[key]] * self.num_generations)
                         reward_kwargs[key].extend([example[key]])
-                #logger.info(f"input to reward func: prompts:  reward_func:={reward_func} prompts={prompts}, completions={completions}")
-                #logger.info(f"reward func: {reward_func}")
+
                 output_reward_func = reward_func(prompts=prompts, completions=completions,
                                                  tool_uses = overall_tools_used,
                                                  group_size = self.num_generations,
                                                  absolute_diff = diff,
                                                  contrasted_area = contrasted_area,
+                                                 contrast_diff_list = contrast_diff_list,
                                                  **reward_kwargs)
                 #logger.info(f"output_reward_func: {output_reward_func}")
                 completion_rewards_per_func[:, i] = torch.tensor(output_reward_func, dtype=torch.float32, device=device)
-        #logger.info(f"rewards per func: {rewards_per_func}")
-        #logger.info("after rewards")
-        #logger.info(f"before gather rewards_per_func: {completion_rewards_per_func}")
-        #logger.info("after rewards calculation")
-        #logger.info(f"Before completion_rewards_per_func gather: {completion_rewards_per_func}")
-        #logger.info(f"Before completion_rewards_per_func gather: {completion_rewards_per_func.shape}")
+        logger.info(f"after per-instance rewards")
         # Gather rewards across processes
         completion_rewards_per_func = self.accelerator.gather(completion_rewards_per_func)
-        #logger.info(f"After completion_rewards_per_func gather")
-        #logger.info(f"after gather rewards_per_func: {completion_rewards_per_func}")
-        #logger.info(f"after gather rewards_per_func: {completion_rewards_per_func.shape}")
-        #logger.info("after gather rewards")
+
         # note that overall_tools_used is global, whereas prompts and completions are local, so group rewards should
         # not use prompts or completions directly
         group_rewards_per_func = torch.zeros(len(overall_tools_used), len(self.reward_funcs_per_group), device=device)
@@ -1557,7 +1444,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         rewards_per_func = torch.cat((completion_rewards_per_func, group_rewards_per_func), dim=1)
 
-
+        logger.info(f"after per-group rewards")
         if self.exploration_pruning_schedule is not None:
 
             binary_tool_use = (overall_tools_used > 0).float()  # (280)
@@ -1573,6 +1460,8 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             if self.exploration_count < self.exploration_pruning_schedule["exploration_threshold"]:
                 # TODO: Make this pretty!
                 rewards = (rewards_per_func * self.reward_func_weights.unsqueeze(0)).sum(dim=1)
+                extended_rewards = (rewards_per_func * self.reward_func_weights.unsqueeze(
+                    0) * self.reward_funcs_for_sampling_weights.unsqueeze(0)).sum(dim=1)
                 #rewards = rewards_per_func[:, 0] + 0.1
             else:
                 # this assumes that accuracy reward is always the first reward in the list
@@ -1581,22 +1470,27 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             self._metrics["no_tool_correct_rate"].append(no_tool_correct_rate_group_level.detach().cpu().numpy().mean().item())
         else:
             # Sum the rewards from all reward functions
-            rewards = (rewards_per_func * self.reward_func_weights.unsqueeze(0)).sum(dim=1)
-
-        #logger.info(f"after per_group rewards: {rewards_per_func}")
-        #logger.info(f"overall tools used before rewards: {overall_tools_used}")
-        #logger.info(f"rewards: {rewards}")
+            rewards = (rewards_per_func * self.reward_func_weights.unsqueeze(0) * self.reward_funcs_for_reward.unsqueeze(0)).sum(dim=1)
+            extended_rewards = (rewards_per_func * self.reward_func_weights.unsqueeze(0) * self.reward_funcs_for_sampling_weights.unsqueeze(0)).sum(dim=1)
 
         # Compute grouped-wise rewards
         # Each group consists of num_generations completions for the same prompt
         mean_grouped_rewards = rewards.view(-1, self.num_generations).mean(dim=1)
+        extended_mean_grouped_rewards = extended_rewards.view(-1, self.num_generations).mean(dim=1)
+
         #logger.info(f"mean_grouped_rewards: {mean_grouped_rewards}")
         std_grouped_rewards = rewards.view(-1, self.num_generations).std(dim=1)
+        extended_std_grouped_rewards = extended_rewards.view(-1, self.num_generations).std(dim=1)
+
         
         # Normalize the rewards to compute the advantages
         mean_grouped_rewards = mean_grouped_rewards.repeat_interleave(self.num_generations, dim=0)
+        extended_mean_grouped_rewards = extended_mean_grouped_rewards.repeat_interleave(self.num_generations, dim=0)
         std_grouped_rewards = std_grouped_rewards.repeat_interleave(self.num_generations, dim=0)
+        extended_std_grouped_rewards = extended_std_grouped_rewards.repeat_interleave(self.num_generations, dim=0)
         advantages = (rewards - mean_grouped_rewards) / (std_grouped_rewards + 1e-4)
+        sampling_weights = (extended_rewards - extended_mean_grouped_rewards) / (extended_std_grouped_rewards + 1e-4)
+        sampling_weights = torch.abs(sampling_weights)
 
         #logger.info(f"global advantages after scoring: {advantages}")
         
@@ -1606,6 +1500,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             (self.accelerator.process_index + 1) * len(prompts),
         )
         advantages = advantages[process_slice]
+        sampling_weights = sampling_weights[process_slice]
 
         # Log the metrics
         completion_length = self.accelerator.gather_for_metrics(non_generation_mask.sum(1)).float().mean().item()
@@ -1613,13 +1508,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         reward_per_func_full = self.accelerator.gather_for_metrics(rewards_per_func)
         reward_per_func = torch.mean(reward_per_func_full, dim=0)
-        #non_zero_mask = reward_per_func_full != 0
-        #if non_zero_mask.any():
-        #    reward_per_func_nonzero = torch.mean(reward_per_func_full[non_zero_mask], dim=0)
-        #else:
-        #    reward_per_func_nonzero = -1 * torch.ones((1, reward_per_func_full.size(1)),
-        #                                          device=reward_per_func_full.device,
-        #                                          dtype=reward_per_func_full.dtype)
+
 
         for i, reward_func in enumerate(self.reward_funcs):
             if isinstance(reward_func["func"], PreTrainedModel):
@@ -1633,6 +1522,11 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         self._metrics["reward_std"].append(self.accelerator.gather_for_metrics(std_grouped_rewards).mean().item())
 
+        logger.info(f"advantages: {advantages}")
+        logger.info(f"sampling weights: {sampling_weights}")
+
+        logger.info(f"end of updated_grpo_trainer_with_vllm")
+
         return {
             "prompt_ids": prompt_ids,
             "prompt_mask": prompt_mask,
@@ -1640,6 +1534,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             "old_per_token_logps": old_per_token_logps,
             "ref_per_token_logps": ref_per_token_logps,
             "advantages": advantages,
+            "sampling_weights": sampling_weights,
             "multimodal_inputs": multimodal_inputs,
             "images_per_sample": images_per_sample,
         }
@@ -1647,7 +1542,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         if return_outputs:
             raise ValueError("The GRPOTrainer does not support returning outputs")
-
+        logger.info(f"in compute loss")
 
         # we only need this for debugging purposes
         num_images = inputs["multimodal_inputs"].pop("num_images")
@@ -1677,12 +1572,13 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         #self.monitor_gpu_usage("compute loss: before live per_token_logps")
         t8 = time.time()
         # Get the current policy's log probabilities
-        per_token_logps = self._get_per_token_logps_new(model, prompt_ids, prompt_mask,
+        per_token_logps, _ = self._get_per_token_logps(model, prompt_ids, prompt_mask,
                                               image_grid_thw=multimodal_inputs["image_grid_thw"],
                                               pixel_values=multimodal_inputs["pixel_values"],
                                               num_images=num_images,
                                               batch_size=self.args.per_device_train_batch_size,
-                                              disable_dropout=False)
+                                              disable_dropout=False,
+                                              return_entropies=False)
         t9 = time.time()
         self._metrics["live_logp_time"].append(t9 - t8)
 
@@ -1698,6 +1594,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         # Get the advantages from inputs
         advantages = inputs["advantages"]
+        logger.info(f"in compute loss: advantages: {advantages}")
 
         # When using num_iterations == 1, old_per_token_logps == per_token_logps, so we can skip its computation
         # and use per_token_logps.detach() instead

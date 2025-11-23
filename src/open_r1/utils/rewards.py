@@ -325,60 +325,79 @@ def pr_penalty_reward(tool_uses, tool_use_penalty_threshold, **kwargs):
 def constant_exploration(tool_uses, **kwargs):
     return (tool_uses > 0).float()
 
-def mutual_information_reward(absolute_diff:torch.Tensor, contrasted_area: torch.Tensor, delta:float, gamma: float,
+def mutual_information_reward(absolute_diff:torch.Tensor, contrasted_area: torch.Tensor, contrast_diff_list: list[torch.Tensor],
+                              delta:float, gamma: float,
                               alpha:float, length_factor_scaling:int, tau:float, discretize:bool, q:float,
                               ignored_prefix_len: int, tanh: bool, **kwargs):
+
+    if ignored_prefix_len is None:
+        ignored_prefix_len = 0
+
+    rewards = []
+    if contrast_diff_list is not None:
+        for contrast_diff in contrast_diff_list:
+            if contrast_diff is None:
+                rewards.append(0.0)
+            else:
+                rewards.append(calculate_mi_reward(contrast_diff, delta = delta, gamma = gamma, alpha = alpha, tau=tau,
+                                                   discretize=discretize, q=q, tanh=tanh,
+                                                   length_factor_scaling=length_factor_scaling))
+    else:
+        for i in range(len(contrasted_area)):
+            reward = 0
+            if len(contrasted_area[i]) > 0:
+                start_contrast = contrasted_area[i][0][0] - 1 + ignored_prefix_len
+                end_contrast = contrasted_area[i][0][1] - 1
+
+                if start_contrast <= end_contrast:
+                    contrast_diff = absolute_diff[i, start_contrast:end_contrast]
+                    reward = calculate_mi_reward(contrast_diff, delta = delta, gamma = gamma, alpha = alpha, tau=tau,
+                                               discretize=discretize, q=q, tanh=tanh,
+                                               length_factor_scaling=length_factor_scaling)
+
+            rewards.append(reward)
+    return rewards
+
+def calculate_mi_reward(contrast_diff: torch.Tensor, delta:float, gamma: float,
+                        alpha:float, length_factor_scaling:int, tau:float,
+                        discretize:bool, q:float, tanh: bool):
 
     if tau is None:
         threshold = 0
     else:
         threshold = tau
 
-    if ignored_prefix_len is None:
-        ignored_prefix_len = 0
+    reward = 0.0
+    if not contrast_diff.numel() == 0:
 
-    rewards = []
-    for i in range(len(contrasted_area)):
-        reward = 0.0
+        if gamma is not None and delta is not None:
+            raise ValueError("gamma and delta cannot be used together")
 
-        if len(contrasted_area[i]) > 0:
-            start_contrast = contrasted_area[i][0][0] - 1 + ignored_prefix_len
-            end_contrast = contrasted_area[i][0][1] - 1
+        if alpha is None:
+            length_factor = 1
+        else:
+            length_factor = (len(contrast_diff) / length_factor_scaling) ** alpha
 
-            if start_contrast <= end_contrast:
-                contrast_diff = absolute_diff[i, start_contrast:end_contrast]
+        if delta is not None:
+            reward = torch.mean(torch.where(contrast_diff > delta, 1.0, 0.0) * length_factor)
 
-                if not contrast_diff.numel() == 0:
+        if gamma is not None:
+            reward = torch.mean((torch.clamp(contrast_diff, min=-gamma, max=gamma) - threshold) * length_factor)
 
-                    if gamma is not None and delta is not None:
-                        raise ValueError("gamma and delta cannot be used together")
+        if q is not None:
+            distr = torch.clamp(contrast_diff, min=-gamma, max=gamma) - threshold
+            original_dtype = distr.dtype
+            distr = distr.to(dtype=torch.float)
+            reward = torch.quantile(distr, q)
+            reward = reward.to(dtype=original_dtype)
 
-                    if alpha is None:
-                        length_factor = 1
-                    else:
-                        length_factor = (len(contrast_diff)/length_factor_scaling)**alpha
+        if discretize is True:
+            if reward < 0:
+                reward = -1
+            else:
+                reward = +1
 
-                    if delta is not None:
-                        reward = torch.mean(torch.where(contrast_diff > delta, 1.0, 0.0) * length_factor)
+        if tanh is True:
+            reward = torch.tanh(torch.sum(torch.clamp(contrast_diff, min=-gamma, max=gamma)) * length_factor)
 
-                    if gamma is not None:
-                        reward = torch.mean((torch.clamp(contrast_diff, min=-gamma, max=gamma)  - threshold) * length_factor)
-
-                    if q is not None:
-                        distr = torch.clamp(contrast_diff, min=-gamma, max=gamma)  - threshold
-                        original_dtype = distr.dtype
-                        distr = distr.to(dtype=torch.float)
-                        reward = torch.quantile(distr, q)
-                        reward = reward.to(dtype=original_dtype)
-
-                    if discretize is True:
-                        if reward < 0:
-                            reward = -1
-                        else:
-                            reward = +1
-
-                    if tanh is True:
-                        reward = torch.tanh(torch.sum(torch.clamp(contrast_diff, min=-gamma, max=gamma)) * length_factor)
-
-        rewards.append(reward)
-    return rewards
+    return reward
