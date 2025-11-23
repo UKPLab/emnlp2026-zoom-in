@@ -368,8 +368,7 @@ class Tool:
             "output_message": self.message.get_content(message_args),
         }
 
-
-def extract_tool(text:str, tool_start:str = TOOL_START, tool_end:str = TOOL_END):
+def extract_tool(text:str, tool_start:str = TOOL_START, tool_end:str = TOOL_END, strict:bool = False, tool_start_position:str = "last"):
     logger.info(f"text from which tool should be extracted: {text}")
 
     no_tool_starts = text.count(tool_start)
@@ -381,11 +380,17 @@ def extract_tool(text:str, tool_start:str = TOOL_START, tool_end:str = TOOL_END)
     ends_with_tool_end = text.endswith(tool_end)
     logger.info(f"tool_end is at the end: {ends_with_tool_end}")
 
-    assert no_tool_starts == 1, f"Tool call failed: there should be a single '{tool_start}', but found {no_tool_starts} instead"
-    assert no_tool_ends == 1, f"Tool call failed: there should be a single '{tool_end}', but found {no_tool_ends} instead"
-    assert ends_with_tool_end, f"Tool call failed: generated text should stop with '{tool_end}'"
+    if strict:
+        assert no_tool_starts == 1, f"Tool call failed: there should be a single '{tool_start}', but found {no_tool_starts} instead"
+        assert no_tool_ends == 1, f"Tool call failed: there should be a single '{tool_end}', but found {no_tool_ends} instead"
+        assert ends_with_tool_end, f"Tool call failed: generated text should stop with '{tool_end}'"
 
-    after_tool_start = text.split(tool_start)[1]
+    if tool_start_position == "first":
+        after_tool_start = text.split(tool_start)[1]
+    elif tool_start_position == "last":
+        after_tool_start = text.split(tool_start)[-1]
+    else:
+        raise ValueError(f"tool_start_position {tool_start_position} not supported. choose from 'first', 'last'")
     tool_content = after_tool_start.split(tool_end)[0]
     logger.info(f"extracted tool: {tool_content}")
 

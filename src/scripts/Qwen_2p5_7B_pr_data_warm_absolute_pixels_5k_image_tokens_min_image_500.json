@@ -6,7 +6,7 @@
     "dataset_name": "pixel_reasoner",
     "data_file_paths": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/pixel_reasoner/RL_data_without_video/train.jsonl",
     "image_folders": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/pixel_reasoner/RL_data_without_video",
-    "max_completion_length": 256,
+    "max_completion_length": 512,
     "ds3_gather_for_generation": true,
     "use_vllm": true,
     "beta": 0.04,

@@ -234,27 +234,6 @@ if __name__ == "__main__":
 
     runs = [
         {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool.json",
-            "shell_number": 1,
-            "path": "",
-            "state": "running"},
-
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_mi_tool_box.json",
-            "shell_number": 4,
-            "path": "",
-            "state": "running"},
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_mi_tool_box.json",
-            "shell_number": 6,
-            "path": "",
-            "state": "running"},
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500.json",
-            "shell_number": 5,
-            "path": "",
-            "state": "running"},
-        {
             "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 2,
             "path": "",
@@ -270,14 +249,27 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 4,
             "path": "",
-            "state": "to_be_launched"
+            "state":"running"
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 6,
             "path": "",
+            "state": "to_be_launched"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_tokens_mi_sample.json",
+            "shell_number": 1,
+            "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_tokens_mi_entropy.json",
+            "shell_number": 5,
+            "path": "",
             "state": "running"
         }
+
 
     ]
 

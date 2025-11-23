@@ -718,12 +718,16 @@ class MultiTurn:
                 contrasted_area_end = 0
             elif contrasted_area_name == "first_box_entry":
                 contrasted_area_begin = len(conv[4].token_ids[box_idx + 2:])
-                contrasted_area_end = contrasted_area_begin + 1
+                contrasted_area_end = contrasted_area_begin - 1
             else:
                 raise ValueError(f"contrasted_area_name: {contrasted_area_name} is unsupported. Choose from 'first_box_entry_to_end' or 'first_box_entry'")
 
             logger.info(f"contrasted_area_begin: {contrasted_area_begin}")
             logger.info(f"contrasted_area_end: {contrasted_area_end}")
+
+            # can happen if generation ends with "\boxed{"
+            if contrasted_area_begin == 0:
+                return None
 
             logger.info(f"short model generation: {new_conv[2].token_ids}")
             logger.info(f"contrasted area token ids: {conv[4].token_ids[-contrasted_area_begin:len(conv[4].token_ids)-contrasted_area_end]}")

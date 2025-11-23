@@ -68,7 +68,7 @@ class GRPOScriptArguments(ScriptArguments):
         metadata={"help": "Weights for reward functions. Must have the same length as reward_funcs"},
     )
     reward_func_usage: list[str] = field(
-        default_factory=lambda: ["both"],
+        default=None,
         metadata={"help": "specifies for each reward function if it should be used for 'reward', 'sampling_weights' or 'both'"}
     )
     max_pixels: Optional[int] = field(
@@ -195,6 +195,13 @@ class GRPOScriptArguments(ScriptArguments):
         default = False,
         metadata={
             "help": "whether to use a tanh function: torch.tanh(torch.clamp(contrast_diff, min=-gamma, max=gamma) * length_factor)"
+        }
+    )
+
+    ignored_prefix_len: Optional[int] = field(
+        default = None,
+        metadata={
+            "help": "deprecated. use mi_contrasted_area instead"
         }
     )
 
@@ -414,6 +421,12 @@ def main(script_args, training_args, model_args):
     reward_funcs = [reward_funcs_registry[func] for func in script_args.reward_funcs]
     assert len(reward_funcs) == len(script_args.reward_func_weights), f"the number of reward functions {reward_funcs} must be equal to the number of reward function weights {script_args.reward_func_weights}"
     logger.info(f"!!! reward_funcs !!!:\n {reward_funcs} \n!!! reward_funcs !!!")
+    if script_args.reward_func_usage is None:
+        reward_func_usage = ["both" for _ in range(len(reward_funcs))]
+        logger.info(f"as reward_func_usage is None, we assume that it is 'both' for all reward_funcs")
+    else:
+        reward_func_usage = script_args.reward_func_usage
+    assert len(reward_funcs) == len(reward_func_usage), f"the number of reward functions {reward_funcs} must be equal to the number of reward function usages {reward_func_usage}"
 
     dataset_names = script_args.dataset_name.split(":")
     data_files = script_args.data_file_paths.split(":")
@@ -500,7 +513,7 @@ def main(script_args, training_args, model_args):
             model=model_args.model_name_or_path,
             reward_funcs=reward_funcs,
             reward_func_weights=script_args.reward_func_weights,
-            reward_func_usage=script_args.reward_func_usage,
+            reward_func_usage=reward_func_usage,
             args=training_args,
             vlm_module=vlm_module_cls(),
             train_dataset=splits['train'].select(data_range) if data_range is not None else splits['train'],

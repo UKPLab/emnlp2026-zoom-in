@@ -1430,7 +1430,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                                                  **reward_kwargs)
                 #logger.info(f"output_reward_func: {output_reward_func}")
                 completion_rewards_per_func[:, i] = torch.tensor(output_reward_func, dtype=torch.float32, device=device)
-
+        logger.info(f"after per-instance rewards")
         # Gather rewards across processes
         completion_rewards_per_func = self.accelerator.gather(completion_rewards_per_func)
 
@@ -1444,7 +1444,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         rewards_per_func = torch.cat((completion_rewards_per_func, group_rewards_per_func), dim=1)
 
-
+        logger.info(f"after per-group rewards")
         if self.exploration_pruning_schedule is not None:
 
             binary_tool_use = (overall_tools_used > 0).float()  # (280)
@@ -1522,6 +1522,11 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         self._metrics["reward_std"].append(self.accelerator.gather_for_metrics(std_grouped_rewards).mean().item())
 
+        logger.info(f"advantages: {advantages}")
+        logger.info(f"sampling weights: {sampling_weights}")
+
+        logger.info(f"end of updated_grpo_trainer_with_vllm")
+
         return {
             "prompt_ids": prompt_ids,
             "prompt_mask": prompt_mask,
@@ -1537,7 +1542,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         if return_outputs:
             raise ValueError("The GRPOTrainer does not support returning outputs")
-
+        logger.info(f"in compute loss")
 
         # we only need this for debugging purposes
         num_images = inputs["multimodal_inputs"].pop("num_images")
@@ -1589,6 +1594,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         # Get the advantages from inputs
         advantages = inputs["advantages"]
+        logger.info(f"in compute loss: advantages: {advantages}")
 
         # When using num_iterations == 1, old_per_token_logps == per_token_logps, so we can skip its computation
         # and use per_token_logps.detach() instead

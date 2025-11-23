@@ -365,7 +365,7 @@ class Buffer:
 
             if k == "prompt_ids":
                 continue
-            elif k == ["advantages", "sampling_weights"]:
+            elif k in ["advantages", "sampling_weights"]:
                 combined_batch[k] = torch.cat(list_by_key, dim=0)
             else:
                 if k in ["prompt_mask", "non_generation_mask"]:
