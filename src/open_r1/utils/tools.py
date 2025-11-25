@@ -30,6 +30,53 @@ TOOL_CONFIGS = {
                 "tool_message_text_fillers": ["width", "height"],
                 "prompt_type": "pr_original"
         },
+            "PR_zoom_in_very_old":
+            {
+                "tool_name": "zoom_in",
+                "tool_description": "Zoom in on the image based on the bounding box coordinates.",
+                "tool_parameter_descriptions": {
+                    "bbox_2d": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image."},
+                "tool_message_image_pos": "last",
+                "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
+                "tool_message_text_fillers": ["width", "height"],
+                "prompt_type": "pr_adapted"
+            },
+            "PR_zoom_in_very_old_w_tool_description":
+            {
+                "tool_name": "zoom_in",
+                "tool_description": "Zoom in on the image based on the bounding box coordinates. It is useful when the object or text in the image is too small to be seen.",
+                "tool_parameter_descriptions": {
+                    "bbox_2d": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image."},
+                "tool_message_image_pos": "last",
+                "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
+                "tool_message_text_fillers": ["width", "height"],
+                "prompt_type": "pr_adapted"
+            },
+
+            "PR_zoom_in_very_old_w_tool_name":
+            {
+                "tool_name": "zoom_in_absolute",
+                "tool_description": "Zoom in on the image based on the bounding box coordinates.",
+                "tool_parameter_descriptions": {
+                    "bbox_2d": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image."},
+                "tool_message_image_pos": "last",
+                "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
+                "tool_message_text_fillers": ["width", "height"],
+                "prompt_type": "pr_adapted"
+            },
+
+            "PR_zoom_in_very_old_w_float":
+            {
+                "tool_name": "zoom_in_absolute_no_absolute",
+                "tool_description": "Zoom in on the image based on the bounding box coordinates.",
+                "tool_parameter_descriptions": {
+                    "bbox_2d": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image."},
+                "tool_message_image_pos": "last",
+                "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
+                "tool_message_text_fillers": ["width", "height"],
+                "prompt_type": "pr_adapted"
+            },
+
             "PR_zoom_in_old":
             {
                 "tool_name": "zoom_in_absolute",
@@ -114,6 +161,33 @@ SHOW_IMAGE = {
             },
         },
     }
+
+ZOOM_IN = {
+        "type": "function",
+        "function": {
+            "name": "zoom_in",
+            "description": "Zoom in on the image based on the bounding box coordinates.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bbox_2d": {
+                        "type": "array",
+                        "description":"normalized coordinates for bounding box of the region you want to zoom in. Values should be within [0.0,1.0].",
+                        # "description": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image.",
+                        "items": {
+                        "type": "float",
+                        }
+                    },
+                    "target_image":{
+                        "type": "integer",
+                        "description": "The index of the image to crop. Index from 1 to the number of images. Choose 1 to operate on original image."
+                    }
+                },
+                "required": ["bbox_2d", "target_image"]
+            }
+        },
+    }
+
 
 ZOOM_IN_RELATIVE = {
         "type": "function",
@@ -260,20 +334,44 @@ class Tool:
         if self.name == "show_image":
             self.callable_function = show_image
             self.tool_dict = SHOW_IMAGE
-        elif self.name == "zoom_in_absolute":
-            if "bbox_type" in self.tool_hparams.keys():
-                if self.tool_hparams["bbox_type"] in ["strict", "absolute"]:
-                    bbox_type = "absolute"
-                else:
-                    bbox_type = self.tool_hparams["bbox_type"]
-            else:
-                bbox_type = None
-
+        elif self.name == "zoom_in":
             self.callable_function = partial(zoom_in,
-                                             min_pixels=self.tool_hparams["min_pixels"] if "min_pixels" in self.tool_hparams.keys() else None,
-                                             max_pixels=self.tool_hparams["max_pixels"] if "max_pixels" in self.tool_hparams.keys() else None,
-                                             bbox_type=bbox_type)
-            self.tool_dict = ZOOM_IN_ABSOLUTE
+                                             min_pixels=self.tool_hparams[
+                                                 "min_pixels"] if "min_pixels" in self.tool_hparams.keys() else None,
+                                             max_pixels=self.tool_hparams[
+                                                 "max_pixels"] if "max_pixels" in self.tool_hparams.keys() else None)
+            self.tool_dict = ZOOM_IN
+        elif self.name == "zoom_in_absolute":
+            #if "bbox_type" in self.tool_hparams.keys():
+            #    if self.tool_hparams["bbox_type"] in ["strict", "absolute"]:
+            #        bbox_type = "absolute"
+            #    else:
+            #        bbox_type = self.tool_hparams["bbox_type"]
+            #else:
+            #    bbox_type = None#
+
+            #self.callable_function = partial(zoom_in,
+            #                                 min_pixels=self.tool_hparams["min_pixels"] if "min_pixels" in self.tool_hparams.keys() else None,
+            #                                 max_pixels=self.tool_hparams["max_pixels"] if "max_pixels" in self.tool_hparams.keys() else None,
+            #                                 bbox_type=bbox_type)
+            #self.tool_dict = ZOOM_IN_ABSOLUTE
+            self.tool_dict = ZOOM_IN
+            self.tool_dict["function"]["name"] = "zoom_in_absolute"
+            self.callable_function = partial(zoom_in,
+                                             min_pixels=self.tool_hparams[
+                                                 "min_pixels"] if "min_pixels" in self.tool_hparams.keys() else None,
+                                             max_pixels=self.tool_hparams[
+                                                 "max_pixels"] if "max_pixels" in self.tool_hparams.keys() else None)
+        elif self.name == "zoom_in_absolute_no_absolute":
+            self.tool_dict = ZOOM_IN
+            self.tool_dict["function"]["name"] = "zoom_in"
+            self.tool_dict["function"]["parameters"]["properties"]["bbox_2d"]["items"]["type"] = "integer"
+            self.name = "zoom_in"
+            self.callable_function = partial(zoom_in,
+                      min_pixels=self.tool_hparams[
+                          "min_pixels"] if "min_pixels" in self.tool_hparams.keys() else None,
+                      max_pixels=self.tool_hparams[
+                          "max_pixels"] if "max_pixels" in self.tool_hparams.keys() else None)
         elif self.name == "zoom_in_relative":
             if "bbox_type" in self.tool_hparams.keys():
                 if self.tool_hparams["bbox_type"] in ["strict", "relative"]:

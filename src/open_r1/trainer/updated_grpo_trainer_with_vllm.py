@@ -1469,6 +1469,8 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             self._metrics["exploration_count"].append(self.exploration_count)
             self._metrics["no_tool_correct_rate"].append(no_tool_correct_rate_group_level.detach().cpu().numpy().mean().item())
         else:
+            logger.info(f"reward_funcs_for_reward: {self.reward_funcs_for_reward}")
+            logger.info(f"reward_funcs_for_sampling_weights: {self.reward_funcs_for_sampling_weights}")
             # Sum the rewards from all reward functions
             rewards = (rewards_per_func * self.reward_func_weights.unsqueeze(0) * self.reward_funcs_for_reward.unsqueeze(0)).sum(dim=1)
             extended_rewards = (rewards_per_func * self.reward_func_weights.unsqueeze(0) * self.reward_funcs_for_sampling_weights.unsqueeze(0)).sum(dim=1)

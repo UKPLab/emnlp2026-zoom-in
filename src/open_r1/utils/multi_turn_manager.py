@@ -8,8 +8,6 @@ import json
 import os
 import copy
 
-from prometheus_client import bridge
-
 from .tools import TOOL_END, TOOL_START, Tool, extract_tool
 from .logger import get_logger
 from transformers import AutoProcessor
