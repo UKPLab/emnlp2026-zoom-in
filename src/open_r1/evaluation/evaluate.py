@@ -25,8 +25,7 @@ from open_r1.utils.multi_turn_manager import MultiTurn, pad
 
 from vllm.inputs import TokensPrompt
 
-# Get logger for this module
-logger = setup_project_logging(log_file=None)
+
 
 import os
 
@@ -152,13 +151,14 @@ class VLLM:
 class Evaluator:
 
     def __init__(self, vlm_module, processing_class, vllm_client, sampling_params:SamplingParams,
-                 multi_turn, max_tool_uses, save_path, metrics):
+                 multi_turn, max_tool_uses, strict_tool_extraction, save_path, metrics):
         self.vlm_module = vlm_module
         self.processing_class = processing_class
         self.vllm_client = vllm_client
         self.sampling_params=sampling_params
         self.multi_turn = multi_turn
         self.max_tool_uses = max_tool_uses
+        self.strict_tool_extraction = strict_tool_extraction
         self.save_path = save_path
         self.metrics = {metric: [] for metric in metrics}
         #self.eval_path = None
@@ -322,7 +322,7 @@ class Evaluator:
             elif self.multi_turn == "tool":
 
                 multi_turn_manager.handle_tool_call(save_path=os.path.join(self.save_path, "tool_calls"),
-                                                    step=0)
+                                                    step=0, strict_extraction=self.strict_tool_extraction)
 
 
                 for idx in range(no_conversations):
@@ -387,7 +387,9 @@ class Evaluator:
 
 
 def evaluation_process(model_path, model_class, output_path:str, tensor_parallel_size: int, image_limit: int, max_tool_uses:int,
+                       strict_tool_extraction: bool,
                        dataset:dict, prompt_type: str,
+                       max_tokens_per_reply: int,
                        batch_size:int=1000, no_vllm:bool=False,
                        enforce_eager:bool=False,
                        tool_args:list[dict]=None,
@@ -399,11 +401,13 @@ def evaluation_process(model_path, model_class, output_path:str, tensor_parallel
 
         for tool_arg in tool_args:
             tools.append(Tool(name=tool_arg["tool_name"],
-                         description=tool_arg["tool_description"],
-                         message=Message(tool_arg["tool_message_image_pos"],
+                              template_name=tool_arg["tool_template"],
+                              json_customization=tool_arg["tool_json_customization"],
+
+                              message=Message(tool_arg["tool_message_image_pos"],
                                          tool_arg["tool_message_text_message"],
                                          tool_arg["tool_message_text_fillers"]),
-                         parameter_descriptions=tool_arg["tool_parameter_descriptions"],
+
                               tool_hparams=tool_arg["tool_hparams"]))
 
     logger.info(f"tools: {tools}")
@@ -434,7 +438,7 @@ def evaluation_process(model_path, model_class, output_path:str, tensor_parallel
         top_p=1.0,
         top_k=-1,
         min_p=0.0,
-        max_tokens=256,
+        max_tokens=max_tokens_per_reply,
     )
 
     evaluator = Evaluator(
@@ -443,6 +447,7 @@ def evaluation_process(model_path, model_class, output_path:str, tensor_parallel
         sampling_params=sampling_params,
         multi_turn="tool",
         max_tool_uses=max_tool_uses,
+        strict_tool_extraction=strict_tool_extraction,
         save_path=output_path,
         vllm_client=llm_engine,
         metrics=["accuracy", "tool_use", "attempted_tool_use", "query", "solution",
@@ -477,8 +482,14 @@ if __name__ == "__main__":
     parser.add_argument('--tool_configs', type=str, default="no_tool", help='tools to use, comma separated')
     parser.add_argument('--max_pixels', type=int, default=None, help='Maximum number of pixels per image')
     parser.add_argument('--min_pixels', type=int, default=None, help='Minimum number of pixels per image')
+    parser.add_argument('--bbox_type', type=str, default=None, help='type of bbox coords to accept. absolute or relative')
+    parser.add_argument('--strict_tool_extraction', type=bool, default=None, help='whether tool extraction is strict or not')
+    parser.add_argument('--max_tokens_per_reply', type=int, default=256, help='Maximum number of tokens per reply')
 
     args = parser.parse_args()
+
+    # Get logger for this module
+    logger = setup_project_logging(log_file=os.path.join(args.output_path, "evaluation.log"))
 
     dataset = {
         "dataset_name": args.dataset_name,
@@ -496,7 +507,8 @@ if __name__ == "__main__":
         args.prompt_type = tool_configs[0]["prompt_type"]
 
     for tool_config in tool_configs:
-        tool_config["tool_hparams"] = {"max_pixels": args.max_pixels, "min_pixels": args.min_pixels}
+        tool_config["tool_hparams"] = {"max_pixels": args.max_pixels, "min_pixels": args.min_pixels,
+                                       "bbox_type": args.bbox_type}
 
     mm_processor_kwargs = {}
     if args.max_pixels is not None:
@@ -514,8 +526,10 @@ if __name__ == "__main__":
         args.tensor_parallel_size,
         args.image_limit,
         args.max_tool_uses,
+        args.strict_tool_extraction,
         dataset,
         args.prompt_type,
+        args.max_tokens_per_reply,
         args.batch_size,
         args.no_vllm,
         args.enforce_eager,

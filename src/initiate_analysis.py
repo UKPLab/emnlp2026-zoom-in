@@ -59,7 +59,8 @@ class DatasetParams:
 
 class EvalParams:
     def __init__(self, batch_size=200, tensor_parallel_size=1, enforce_eager=True, no_vllm=False, dry_run=False,
-                 min_pixels=None, max_pixels=None, tool_config_type = "no_tool", image_limit=6, max_tool_uses=5, **kwargs):
+                 min_pixels=None, max_pixels=None, tool_config_type = "no_tool", image_limit=6, max_tool_uses=5,
+                 bbox_type=None, strict_tool_extraction=False,max_tokens_per_reply=256, **kwargs):
         # technical
         self.batch_size = batch_size
         self.tensor_parallel_size = tensor_parallel_size
@@ -81,6 +82,11 @@ class EvalParams:
         self.tool_config_type = tool_config_type
         self.image_limit = image_limit
         self.max_tool_uses = max_tool_uses
+
+        self.bbox_type = bbox_type
+        self.strict_tool_extraction = strict_tool_extraction
+        self.max_tokens_per_reply = max_tokens_per_reply
+
 
         if self.dry_run:
             self.batch_size = 2
@@ -117,6 +123,10 @@ class SingleEval:
             '--tool_config', f'{self.eval_params.tool_config_type}',
             '--max_pixels', f'{self.eval_params.max_pixels}',
             '--min_pixels', f'{self.eval_params.min_pixels}',
+            '--bbox_type', f'{self.eval_params.bbox_type}',
+            '--strict_tool_extraction', f'{self.eval_params.strict_tool_extraction}',
+            '--max_tokens_per_reply', f'{self.eval_params.max_tokens_per_reply}'
+
         ]
         if self.eval_params.no_vllm:
             cmd.append('--no_vllm')
@@ -1067,15 +1077,18 @@ if __name__ == "__main__":
         {
             "short_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500",
             "model_path": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_20251031_111228",
-            "checkpoint": [382, 764, 1146],
+            "checkpoint": [382],
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
-            "tool_config_type": ["PR_zoom_in_old", "no_tool"],
-            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "tool_config_type": ["zoom_in_absolute"],
+            "dataset_name": ["pixel_reasoner_vstar"],
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [500 * 28 * 28],
-            "evaluate": False,
-            "analyze": False,  # True
-            "contains_full_chkp": True,
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [True],
+            'max_tokens_per_reply': [256],
+            "evaluate": True,
+            "analyze": True,  # True
+            "contains_full_chkp": False,
             "run_finished": True
         },
         {
@@ -1157,14 +1170,48 @@ if __name__ == "__main__":
             "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [256],
             "evaluate": False,
-            "analyze": True,  # True
+            "analyze": False,  # True
             "contains_full_chkp": False,
             "run_finished": True
         },
-
-
-
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool_20251115_012947",
+            "checkpoint": [382, 764, 1146],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [256],
+            "evaluate": False,
+            "analyze": False,  # True
+            "contains_full_chkp": False,
+            "run_finished": True
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_description",
+            "model_path": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_description_20251124_110836",
+            "checkpoint": [382],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["zoom_in_absolute"],
+            "dataset_name": ["pixel_reasoner_vstar"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [True],
+            'max_tokens_per_reply': [256],
+            "evaluate": False,
+            "analyze": False,  # True
+            "contains_full_chkp": False,
+            "run_finished": True
+        },
     ]
 
     do_eval = False
@@ -1252,10 +1299,13 @@ if __name__ == "__main__":
 
 
         df = all_evals.make_results_table(names=order, metrics=metrics,
-                                          fixed_params={"dataset_name": "pixel_reasoner_infovqa",
+                                          fixed_params={"dataset_name": "pixel_reasoner_vstar",
                                                                                       "max_pixels": 5000*28*28,#1024*16*28*28, #1000*28*28, #1024*16*28*28,# 1024*16*28*28, #,# 1024*16*28*28, #1000*28*28,# 1024*16*28*28,# ,# , #1024*16*28*28,
                                                                                       #"min_pixels": 500 * 28 * 28,
-                                                                                      "tool_config_type": "no_tool"#"no_tool"#""#"no_tool"# "no_tool"#"PR_zoom_in_old"#"no_tool",#"PR_zoom_in_old"#"no_tool"## #  #"PR_zoom_in_old"# "no_tool" #"PR_zoom_in_old" #"no_tool" ## #"no_tool", #""#
+                                                                                      "tool_config_type": "zoom_in_absolute", #"zoom_in_absolute",
+                                                                                        #'bbox_type': "absolute",
+                                                                                        #'strict_tool_extraction': True,
+                                                                                        #'max_tokens_per_reply': 256
                                                                                   }
                                           )
         pd.set_option('display.max_columns', 10)

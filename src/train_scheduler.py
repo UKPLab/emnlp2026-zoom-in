@@ -249,13 +249,13 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 4,
             "path": "",
-            "state":"running"
+            "state":"wait"
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 6,
             "path": "",
-            "state": "to_be_launched"
+            "state": "wait"
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_tokens_mi_sample.json",
@@ -268,7 +268,79 @@ if __name__ == "__main__":
             "shell_number": 5,
             "path": "",
             "state": "running"
-        }
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_one_tool_use.json",
+            "shell_number": 7,
+            "path": "",
+            "state": "terminated"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_old_tool_name_one_tool_use.json",
+            "shell_number": 4,
+            "path": "",
+            "state": "terminated"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_old_tool_name_two_tool_uses.json",
+            "shell_number": 6,
+            "path": "",
+            "state": "terminated"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_description.json",
+            "shell_number": 7,
+            "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_tool_name.json",
+            "shell_number": 4,
+            "path": "",
+            "state": "terminated"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_tool_float.json",
+            "shell_number": 6,
+            "path": "",
+            "state": "terminated"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500.json",
+            "shell_number": 6,
+            "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_strict.json",
+            "shell_number": 4,
+            "path": "",
+            "state": "terminated"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500.json",
+            "shell_number": 2,
+            "path": "",
+            "state": "to_be_launched"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500_strict.json",
+            "shell_number": 6,
+            "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_5k_image_tokens_min_image_500.json",
+            "shell_number": 7,
+            "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_5k_image_tokens_min_image_500_strict.json",
+            "shell_number": 1,
+            "path": "",
+            "state": "running"
+        },
 
 
     ]

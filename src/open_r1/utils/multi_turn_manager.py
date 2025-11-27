@@ -8,8 +8,6 @@ import json
 import os
 import copy
 
-from prometheus_client import bridge
-
 from .tools import TOOL_END, TOOL_START, Tool, extract_tool
 from .logger import get_logger
 from transformers import AutoProcessor
@@ -449,7 +447,7 @@ class MultiTurn:
 
         return all_image_sizes
 
-    def handle_tool_call(self, save_path, step):
+    def handle_tool_call(self, save_path, step, strict_extraction=False):
         image_paths = self.get_image_paths(flatten=False)
         for conv_id, turns in enumerate(self.all_multi_turn):
             if self.is_finished[conv_id]:
@@ -462,7 +460,7 @@ class MultiTurn:
                 turn.attempted_tool_call = True
 
                 try:
-                    tool_params = extract_tool(turn.text)
+                    tool_params = extract_tool(turn.text, strict=strict_extraction)
                     logger.info(f"tool params: {tool_params}")
                     tool_params["image_paths"] = image_paths[conv_id]
                     correct_tool_name = False
