@@ -298,6 +298,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         chat_template: dict = None,
         save_path: str = None,
         max_tool_uses: int = None,
+        strict_tool_extraction: bool = None,
         processor_init_kwargs: dict = None,
         tools: Union[Tool, list[Tool]] = None,
         use_global_buffer: bool = False,
@@ -320,6 +321,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         self.vlm_module = vlm_module
         self.save_path = save_path
         self.max_tool_uses = max_tool_uses
+        self.strict_tool_extraction = strict_tool_extraction
         if tools == []:
             self.tools = None
         elif isinstance(tools, Tool):
@@ -1047,7 +1049,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                         multi_turn_manager.is_finished = [True for _ in range(no_conversations)]
                 elif self.multi_turn == "tool":
                     multi_turn_manager.handle_tool_call(save_path=os.path.join(self.save_path, "tool_calls"),
-                                                   step=self.state.global_step)
+                                                   step=self.state.global_step, strict_extraction=self.strict_tool_extraction)
 
                     for idx in range(no_conversations):
                         if self.max_tool_uses is not None and multi_turn_manager.get_no_tool_calls(idx) > self.max_tool_uses:

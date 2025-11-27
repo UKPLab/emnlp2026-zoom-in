@@ -49,7 +49,7 @@
     "epsilon": 0.2,
     "tool_config": "zoom_in_absolute",
     "tool_bbox_type": "absolute",
-    "strict_tool_extraction": false,
+    "strict_tool_extraction": true,
     "global_buffer": true,
     "save_strategy": "epoch",
     "save_only_model": false,

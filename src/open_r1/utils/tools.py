@@ -1,8 +1,11 @@
 import json
+
 from PIL import Image
 import uuid
 import os
-from functools import partial
+from functools import partial, reduce
+import operator
+import copy
 from qwen_vl_utils import smart_resize
 
 from .logger import get_logger
@@ -12,117 +15,59 @@ from .utils import get_resized_image_scales
 logger = get_logger(__name__)
 
 TOOL_CONFIGS = {
-            "PR_crop": {
-                "tool_name": "crop_image",
-                "tool_description": "Zoom in on the image based on the bounding box coordinates. It is useful when the object or text in the image is too small to be seen.",
-                "tool_parameter_descriptions": {"bbox_2d": "coordinates for bounding box of the area you want to zoom in. Values should be within [0.0,1.0]."},
-                "tool_message_image_pos": "last",
-                "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
-                "tool_message_text_fillers": ["width", "height"],
-                "prompt_type": "pr_adapted"
-        },
-            "PR_crop_original": {
-                "tool_name": "crop_image_normalized",
-                "tool_description": "Zoom in on the image based on the bounding box coordinates. It is useful when the object or text in the image is too small to be seen.",
-                "tool_parameter_descriptions": {"bbox_2d": "coordinates for bounding box of the area you want to zoom in. Values should be within [0.0,1.0]."},
-                "tool_message_image_pos": "last",
-                "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
-                "tool_message_text_fillers": ["width", "height"],
-                "prompt_type": "pr_original"
-        },
-            "PR_zoom_in_very_old":
-            {
-                "tool_name": "zoom_in",
-                "tool_description": "Zoom in on the image based on the bounding box coordinates.",
-                "tool_parameter_descriptions": {
-                    "bbox_2d": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image."},
-                "tool_message_image_pos": "last",
-                "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
-                "tool_message_text_fillers": ["width", "height"],
-                "prompt_type": "pr_adapted"
-            },
-            "PR_zoom_in_very_old_w_tool_description":
-            {
-                "tool_name": "zoom_in",
-                "tool_description": "Zoom in on the image based on the bounding box coordinates. It is useful when the object or text in the image is too small to be seen.",
-                "tool_parameter_descriptions": {
-                    "bbox_2d": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image."},
-                "tool_message_image_pos": "last",
-                "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
-                "tool_message_text_fillers": ["width", "height"],
-                "prompt_type": "pr_adapted"
-            },
+            "PR_zoom_in":
+            {   "tool_name": "zoom_in",
+                "tool_template": "zoom_in",
+                "tool_json_customization": {"function,description":"Zoom in on the image based on the bounding box coordinates.",
+                                            "function,parameters,properties,bbox_2d,description":"normalized coordinates for bounding box of the region you want to zoom in. Values should be within [0.0,1.0].",
+                                            "function,parameters,properties,bbox_2d,items,type": "number",
+                                            "function,parameters,properties,target_image,type": "number",},
 
-            "PR_zoom_in_very_old_w_tool_name":
-            {
-                "tool_name": "zoom_in_absolute",
-                "tool_description": "Zoom in on the image based on the bounding box coordinates.",
-                "tool_parameter_descriptions": {
-                    "bbox_2d": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image."},
                 "tool_message_image_pos": "last",
                 "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
                 "tool_message_text_fillers": ["width", "height"],
                 "prompt_type": "pr_adapted"
             },
+            "PR_zoom_in_with_hint":
+            {"tool_name": "zoom_in",
+             "tool_template": "zoom_in",
+             "tool_json_customization": {
+                 "function,description": "Zoom in on the image based on the bounding box coordinates. It is useful when the object or text in the image is too small to be seen.",
+                 "function,parameters,properties,bbox_2d,description": "normalized coordinates for bounding box of the region you want to zoom in. Values should be within [0.0,1.0].",
+                 "function,parameters,properties,bbox_2d,items,type": "number",
+                 "function,parameters,properties,target_image,type": "number", },
 
-            "PR_zoom_in_very_old_w_float":
-            {
-                "tool_name": "zoom_in_absolute_no_absolute",
-                "tool_description": "Zoom in on the image based on the bounding box coordinates.",
-                "tool_parameter_descriptions": {
-                    "bbox_2d": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image."},
+             "tool_message_image_pos": "last",
+             "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
+             "tool_message_text_fillers": ["width", "height"],
+             "prompt_type": "pr_adapted"
+             },
+            "zoom_in_absolute":
+            {   "tool_name": "zoom_in",
+                "tool_template": "zoom_in",
+                "tool_json_customization": {"function,description": "Zoom in on the image based on the bounding box coordinates.",
+                                            "function,parameters,properties,bbox_2d,description": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image.",
+                                            "function,parameters,properties,bbox_2d,items,type": "integer"},
                 "tool_message_image_pos": "last",
                 "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
                 "tool_message_text_fillers": ["width", "height"],
                 "prompt_type": "pr_adapted"
             },
-
-            "PR_zoom_in_old":
-            {
-                "tool_name": "zoom_in_absolute",
-                "tool_description": "Zoom in on the image based on the bounding box coordinates. It is useful when the object or text in the image is too small to be seen.",
-                "tool_parameter_descriptions": {},
-                "tool_message_image_pos": "last",
-                "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
-                "tool_message_text_fillers": ["width", "height"],
-                "prompt_type": "pr_adapted",
-            },
-            "PR_zoom_in_old_exploration":
-            {
-                "tool_name": "zoom_in",
-                "tool_description": "Zoom in on the image based on the bounding box coordinates.",
-                "tool_parameter_descriptions": {
-                    "bbox_2d": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image."},
+            "zoom_in_relative":
+            {   "tool_name": "zoom_in",
+                "tool_template": "zoom_in",
+                "tool_json_customization": {"function,description": "Zoom in on the image based on the bounding box coordinates.",
+                                            "function,parameters,properties,bbox_2d,description": "normalized coordinates for bounding box of the region you want to zoom in. Values should be within [0.0,1.0].",
+                                            "function,parameters,properties,bbox_2d,items,type": "float"},
                 "tool_message_image_pos": "last",
                 "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
                 "tool_message_text_fillers": ["width", "height"],
                 "prompt_type": "pr_adapted"
             },
-            "PR_zoom_in_new":
-                {
-                    "tool_name": "zoom_in_relative",
-                    "tool_description": "Zoom in on the image based on the bounding box coordinates. It is useful when the object or text in the image is too small to be seen.",
-                    "tool_parameter_descriptions": {},
-                    "tool_message_image_pos": "last",
-                    "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
-                    "tool_message_text_fillers": ["width", "height"],
-                    "prompt_type": "pr_adapted",
-                },
-            "first_own_training":
-                {
-                    "tool_name": "zoom_in",
-                    "tool_description": "Zoom in on the image based on the bounding box coordinates.",
-                    "tool_parameter_descriptions": {
-                        "bbox_2d": "normalized coordinates for bounding box of the region you want to zoom in. Values should be within [0.0,1.0]."},
-                    "tool_message_image_pos": "first",
-                    "tool_message_text_message": "Here is image <target_image> zoomed in at <bbox_2d>.",
-                    "tool_message_text_fillers": ["target_image", "bbox_2d"],
-                    "prompt_type": "pr_adapted"
-                },
             "no_tool": {
                 "tool_name": "",
-                "tool_description": "",
-                "tool_parameter_descriptions": {},
+                "tool_template": "",
+                "tool_json_customization": {},
                 "tool_message_image_pos": "",
                 "tool_message_text_message": "",
                 "tool_message_text_fillers": [],
@@ -130,163 +75,159 @@ TOOL_CONFIGS = {
             },
             "select_frames": {
                 "tool_name": "select_frames",
-                "tool_description": "Select frames from a video.",
-                "tool_parameter_descriptions": {
-                        "target_frames": "List of frame indices to select from the video (no more than 8 frames in total)."
-                },
+                "tool_template": "select_frames",
+                "tool_json_customization": {},
                 "tool_message_image_pos": "last",
                 "tool_message_text_message": "\nHere are the selected frames (Frame Size: <width>x<height>, Numbered <start> to <end>):",
                 "tool_message_text_fillers": ["width", "height", "start", "end"],
                 "prompt_type": "pr_original"
-
             }
 
         }
 
-SHOW_IMAGE = {
-        "type": "function",
-        "function": {
-            "name": "show_image",
-            "description": "The input image gets repeated. Specify which image position to repeat.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "target_image": {
-                        "type": "integer",
-                        "description": "The position of the image to repeat (e.g., 1 for first image, 2 for second image, etc.)",
-                        "minimum": 1
-                    }
-                },
-                "required": ["target_image"]
-            },
-        },
-    }
+def show_image(image_path: str, **kwargs):
+    """
+    Returns the input image. It is then fed to the MLLM again so it can spot details that were missed earlier.
+    :return: The input image.
+    """
+    return image_path
 
-ZOOM_IN = {
-        "type": "function",
-        "function": {
-            "name": "zoom_in",
-            "description": "Zoom in on the image based on the bounding box coordinates.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "bbox_2d": {
-                        "type": "array",
-                        "description":"normalized coordinates for bounding box of the region you want to zoom in. Values should be within [0.0,1.0].",
-                        # "description": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image.",
-                        "items": {
-                        "type": "float",
-                        }
-                    },
-                    "target_image":{
-                        "type": "integer",
-                        "description": "The index of the image to crop. Index from 1 to the number of images. Choose 1 to operate on original image."
-                    }
-                },
-                "required": ["bbox_2d", "target_image"]
-            }
-        },
-    }
+def zoom_in(image_path, bbox_2d, padding=(0.1,0.1), min_pixels=None, max_pixels=None, bbox_type:str=None,
+            adaptive_padding_threshold:int=600.0):
+    """
+    Crop the image based on the bounding box coordinates.
+    """
+    image = Image.open(image_path)
+    img_x, img_y = image.size
+
+    input_height, input_width = get_resized_image_scales(img_y, img_x, min_pixels, max_pixels)
+
+    logger.info(f"in zoom_in: original size: {img_x}x{img_y}")
+    logger.info(f"in zoom_in: small size: {input_width}x{input_height}")
+
+    if adaptive_padding_threshold is not None:
+        padding_tr = (adaptive_padding_threshold/input_width,adaptive_padding_threshold/input_height)
+        padding = (min(padding[0],padding_tr[0]),min(padding[1],padding_tr[1]))
+
+    if bbox_type == "relative":
+        if bbox_2d[0] < 1 and bbox_2d[1] < 1 and bbox_2d[2] < 1 and bbox_2d[3] < 1:
+            normalized_bbox_2d = (float(bbox_2d[0])-padding[0],
+                                  float(bbox_2d[1])-padding[1],
+                                  float(bbox_2d[2])+padding[0],
+                                  float(bbox_2d[3])+padding[1])
+        else:
+            raise ValueError(f"Invalid bounding box coordinates: {bbox_2d}. They should be floating point values in [0,1].")
+    if bbox_type == "absolute":
+        if isinstance(bbox_2d[0], int) and isinstance(bbox_2d[1], int) and isinstance(bbox_2d[2], int) and isinstance(bbox_2d[3], int):
+            normalized_bbox_2d = (float(bbox_2d[0])/input_width-padding[0],
+                                  float(bbox_2d[1])/input_height-padding[1],
+                                  float(bbox_2d[2])/input_width+padding[0],
+                                  float(bbox_2d[3])/input_height+padding[1])
+        else:
+            raise ValueError(f"Invalid bounding box coordinates: {bbox_2d}. They should be integers >= 0.")
+
+    if bbox_type is None:
+        if bbox_2d[0] < 1 and bbox_2d[1] < 1 and bbox_2d[2] < 1 and bbox_2d[3] < 1:
+            normalized_bbox_2d = (float(bbox_2d[0])-padding[0],
+                                  float(bbox_2d[1])-padding[1],
+                                  float(bbox_2d[2])+padding[0],
+                                  float(bbox_2d[3])+padding[1])
+        else:
+            normalized_bbox_2d = (float(bbox_2d[0]) / input_width - padding[0],
+                                  float(bbox_2d[1]) / input_height - padding[1],
+                                  float(bbox_2d[2]) / input_width + padding[0],
+                                  float(bbox_2d[3]) / input_height + padding[1])
+
+    normalized_x1, normalized_y1, normalized_x2, normalized_y2 = normalized_bbox_2d
+    normalized_x1 =min(max(0, normalized_x1), 1)
+    normalized_y1 =min(max(0, normalized_y1), 1)
+    normalized_x2 =min(max(0, normalized_x2), 1)
+    normalized_y2 =min(max(0, normalized_y2), 1)
+    cropped_img = image.crop((int(normalized_x1*img_x),
+                              int(normalized_y1*img_y),
+                              int(normalized_x2*img_x),
+                              int(normalized_y2*img_y)))
+    w, h = cropped_img.size
+    assert w > 28 and h > 28, f"Cropped image is too small: {w}x{h}"
+
+    return cropped_img
+
+def select_frames():
+    raise NotImplementedError
 
 
-ZOOM_IN_RELATIVE = {
-        "type": "function",
-        "function": {
-            "name": "zoom_in_relative",
-            "description": "Zoom in on the image based on the bounding box coordinates.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "bbox_2d": {
-                        "type": "array",
-                        "description":"normalized coordinates for bounding box of the region you want to zoom in. Values should be within [0.0,1.0].",
-                        # "description": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image.",
-                        "items": {
-                        "type": "float",
-                        }
-                    },
-                    "target_image":{
-                        "type": "integer",
-                        "description": "The index of the image to crop. Index from 1 to the number of images. Choose 1 to operate on original image."
-                    }
-                },
-                "required": ["bbox_2d", "target_image"]
-            }
-        },
-    }
-
-ZOOM_IN_ABSOLUTE = {
-        "type": "function",
-        "function": {
-            "name": "zoom_in_absolute",
-            "description": "Zoom in on the image based on the bounding box coordinates.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "bbox_2d": {
-                        "type": "array",
-                        "description":"coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image.",
-                        "items": {
-                        "type": "integer",
-                        }
-                    },
-                    "target_image":{
-                        "type": "integer",
-                        "description": "The index of the image to crop. Index from 1 to the number of images. Choose 1 to operate on original image."
-                    }
-                },
-                "required": ["bbox_2d", "target_image"]
-            }
-        },
-    }
-
-CROP_IMAGE = {
-        "type": "function",
-        "function": {
-            "name": "crop_image",
-            "description": "Zoom in on the image based on the bounding box coordinates.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "bbox_2d": {
-                        "type": "array",
-                        "description": "coordinates for bounding box of the area you want to zoom in. Values should be within [0.0,1.0].",
-                        "items": {
-                            "type": "number",
-                        }
-                    },
-                    "target_image":{
-                        "type": "number",
-                        "description": "The index of the image to crop. Index from 1 to the number of images. Choose 1 to operate on original image."
-                    }
-                },
-                "required": ["bbox_2d", "target_image"]
-            }
-        }
-    }
-
-SELECT_FRAMES = {
-    "type": "function",
-    "function": {
-        "name": "select_frames",
-        "description": "Select frames from a video.",
-        "parameters": {
+TOOL_TEMPLATES = {
+    "zoom_in": {
+        "json": {
+            "type": "function",
+            "function": {
+                "name": "zoom_in",
+                "description": "Zoom in on the image based on the bounding box coordinates.",
+                "parameters": {
                     "type": "object",
                     "properties": {
-                        "target_frames": {
+                        "bbox_2d": {
                             "type": "array",
-                            "description": "List of frame indices to select from the video (no more than 8 frames in total).",
+                            "description":"normalized coordinates for bounding box of the region you want to zoom in. Values should be within [0.0,1.0].",
                             "items": {
-                                "type": "integer",
-                                "description": "Frame index from 1 to 16."
+                            "type": "float",
                             }
+                        },
+                        "target_image":{
+                            "type": "integer",
+                            "description": "The index of the image to crop. Index from 1 to the number of images. Choose 1 to operate on original image."
                         }
                     },
-                    "required": ["target_frames"]
+                    "required": ["bbox_2d", "target_image"]
                 }
+            }
+        },
+        "callable": zoom_in},
 
-    }
+    "select_frames": {
+        "json": {
+            "type": "function",
+            "function": {
+                "name": "select_frames",
+                "description": "Select frames from a video.",
+                "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "target_frames": {
+                                    "type": "array",
+                                    "description": "List of frame indices to select from the video (no more than 8 frames in total).",
+                                    "items": {
+                                        "type": "integer",
+                                        "description": "Frame index from 1 to 16."
+                                    }
+                                }
+                            },
+                            "required": ["target_frames"]
+                }
+            }
+        },
+        "callable": select_frames},
 
+    "show_image": {
+        "json": {
+            "type": "function",
+            "function": {
+                "name": "show_image",
+                "description": "The input image gets repeated. Specify which image position to repeat.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "target_image": {
+                            "type": "integer",
+                            "description": "The position of the image to repeat (e.g., 1 for first image, 2 for second image, etc.)",
+                            "minimum": 1
+                        }
+                    },
+                    "required": ["target_image"]
+                },
+            },
+        },
+        "callable": show_image},
 }
 
 TOOL_START = "<tool_call>"
@@ -322,94 +263,24 @@ class Message:
 
 
 class Tool:
-    def __init__(self, name:str, description:str, message:Message, parameter_descriptions:dict, tool_hparams: dict):
+    def __init__(self, name:str, template_name: str, json_customization: dict, message:Message, tool_hparams: dict):
         self.name = name
-        self.description = description
-        self.parameter_descriptions = parameter_descriptions
+
+        self.json_customization = json_customization
+
+        self.tool_dict = copy.deepcopy(TOOL_TEMPLATES[template_name]["json"])
+        for path_to_key, value in self.json_customization.items():
+            keys = path_to_key.split(",")
+            #print(f"in Tool: keys: {keys}")
+            #print(f"in Tool: {self.tool_dict}")
+
+            last_container = reduce(operator.getitem, keys[:-1], self.tool_dict)
+            last_container[keys[-1]] = value
+
         self.message = message
 
         self.tool_hparams = tool_hparams
-
-
-        if self.name == "show_image":
-            self.callable_function = show_image
-            self.tool_dict = SHOW_IMAGE
-        elif self.name == "zoom_in":
-            self.callable_function = partial(zoom_in,
-                                             min_pixels=self.tool_hparams[
-                                                 "min_pixels"] if "min_pixels" in self.tool_hparams.keys() else None,
-                                             max_pixels=self.tool_hparams[
-                                                 "max_pixels"] if "max_pixels" in self.tool_hparams.keys() else None)
-            self.tool_dict = ZOOM_IN
-        elif self.name == "zoom_in_absolute":
-            #if "bbox_type" in self.tool_hparams.keys():
-            #    if self.tool_hparams["bbox_type"] in ["strict", "absolute"]:
-            #        bbox_type = "absolute"
-            #    else:
-            #        bbox_type = self.tool_hparams["bbox_type"]
-            #else:
-            #    bbox_type = None#
-
-            #self.callable_function = partial(zoom_in,
-            #                                 min_pixels=self.tool_hparams["min_pixels"] if "min_pixels" in self.tool_hparams.keys() else None,
-            #                                 max_pixels=self.tool_hparams["max_pixels"] if "max_pixels" in self.tool_hparams.keys() else None,
-            #                                 bbox_type=bbox_type)
-            #self.tool_dict = ZOOM_IN_ABSOLUTE
-            self.tool_dict = ZOOM_IN
-            self.tool_dict["function"]["name"] = "zoom_in_absolute"
-            self.callable_function = partial(zoom_in,
-                                             min_pixels=self.tool_hparams[
-                                                 "min_pixels"] if "min_pixels" in self.tool_hparams.keys() else None,
-                                             max_pixels=self.tool_hparams[
-                                                 "max_pixels"] if "max_pixels" in self.tool_hparams.keys() else None)
-        elif self.name == "zoom_in_absolute_no_absolute":
-            self.tool_dict = ZOOM_IN
-            self.tool_dict["function"]["name"] = "zoom_in"
-            self.tool_dict["function"]["parameters"]["properties"]["bbox_2d"]["items"]["type"] = "integer"
-            self.name = "zoom_in"
-            self.callable_function = partial(zoom_in,
-                      min_pixels=self.tool_hparams[
-                          "min_pixels"] if "min_pixels" in self.tool_hparams.keys() else None,
-                      max_pixels=self.tool_hparams[
-                          "max_pixels"] if "max_pixels" in self.tool_hparams.keys() else None)
-        elif self.name == "zoom_in_relative":
-            if "bbox_type" in self.tool_hparams.keys():
-                if self.tool_hparams["bbox_type"] in ["strict", "relative"]:
-                    bbox_type = "relative"
-                else:
-                    bbox_type = self.tool_hparams["bbox_type"]
-            else:
-                bbox_type = None
-
-            self.callable_function = partial(zoom_in,
-                                             min_pixels=self.tool_hparams[
-                                                 "min_pixels"] if "min_pixels" in self.tool_hparams.keys() else None,
-                                             max_pixels=self.tool_hparams[
-                                                 "max_pixels"] if "max_pixels" in self.tool_hparams.keys() else None,
-                                             bbox_type=bbox_type)
-            self.tool_dict = ZOOM_IN_RELATIVE
-
-        elif self.name == "crop_image":
-            self.callable_function = partial(crop_image,
-                                             min_pixels=self.tool_hparams["min_pixels"] if "min_pixels" in self.tool_hparams.keys() else None,
-                                             max_pixels=self.tool_hparams["max_pixels"] if "max_pixels" in self.tool_hparams.keys() else None)
-            self.tool_dict = CROP_IMAGE
-        elif self.name == "crop_image_normalized":
-            self.callable_function = partial(crop_image,
-                                             min_pixels=self.tool_hparams["min_pixels"] if "min_pixels" in self.tool_hparams.keys() else None,
-                                             max_pixels=self.tool_hparams["max_pixels"] if "max_pixels" in self.tool_hparams.keys() else None,
-                                             bbox_type=self.tool_hparams["bbox_type"] if "bbox_type" in self.tool_hparams.keys() else None)
-            self.tool_dict = CROP_IMAGE
-            self.tool_dict["function"]["name"] = "crop_image_normalized"
-        elif self.name == "select_frames":
-            self.callable_function = select_frames
-            self.tool_dict = SELECT_FRAMES
-        else:
-            raise ValueError(f"Invalid tool name: {name}")
-
-        self.tool_dict["function"]["description"] = self.description
-        for param_name, param_desc in self.parameter_descriptions.items():
-            self.tool_dict["function"]["parameters"]["properties"][param_name]["description"] = param_desc
+        self.callable_function = partial(TOOL_TEMPLATES[template_name]["callable"], **self.tool_hparams)
 
     def get_tool_dict(self) -> dict:
         return self.tool_dict
@@ -479,6 +350,7 @@ def extract_tool(text:str, tool_start:str = TOOL_START, tool_end:str = TOOL_END,
     logger.info(f"tool_end is at the end: {ends_with_tool_end}")
 
     if strict:
+        logger.info(f"tool extraction is strict!")
         assert no_tool_starts == 1, f"Tool call failed: there should be a single '{tool_start}', but found {no_tool_starts} instead"
         assert no_tool_ends == 1, f"Tool call failed: there should be a single '{tool_end}', but found {no_tool_ends} instead"
         assert ends_with_tool_end, f"Tool call failed: generated text should stop with '{tool_end}'"
@@ -496,105 +368,4 @@ def extract_tool(text:str, tool_start:str = TOOL_START, tool_end:str = TOOL_END,
 
 
 
-def show_image(image_path: str, **kwargs):
-    """
-    Returns the input image. It is then fed to the MLLM again so it can spot details that were missed earlier.
-    :return: The input image.
-    """
-    return image_path
 
-def zoom_in(image_path, bbox_2d, padding=(0.1,0.1), min_pixels=None, max_pixels=None, bbox_type:str=None,
-            adaptive_padding_threshold:int=600.0):
-    """
-    Crop the image based on the bounding box coordinates.
-    """
-    image = Image.open(image_path)
-    img_x, img_y = image.size
-
-    input_height, input_width = get_resized_image_scales(img_y, img_x, min_pixels, max_pixels)
-
-    logger.info(f"in zoom_in: original size: {img_x}x{img_y}")
-    logger.info(f"in zoom_in: small size: {input_width}x{input_height}")
-
-    if adaptive_padding_threshold is not None:
-        padding_tr = (adaptive_padding_threshold/input_width,adaptive_padding_threshold/input_height)
-        padding = (min(padding[0],padding_tr[0]),min(padding[1],padding_tr[1]))
-
-    if bbox_type == "relative":
-        if bbox_2d[0] < 1 and bbox_2d[1] < 1 and bbox_2d[2] < 1 and bbox_2d[3] < 1:
-            normalized_bbox_2d = (float(bbox_2d[0])-padding[0],
-                                  float(bbox_2d[1])-padding[1],
-                                  float(bbox_2d[2])+padding[0],
-                                  float(bbox_2d[3])+padding[1])
-        else:
-            raise ValueError(f"Invalid bounding box coordinates: {bbox_2d}. They should be floating point values in [0,1].")
-    if bbox_type == "absolute":
-        if isinstance(bbox_2d[0], int) and isinstance(bbox_2d[1], int) and isinstance(bbox_2d[2], int) and isinstance(bbox_2d[3], int):
-            normalized_bbox_2d = (float(bbox_2d[0])/input_width-padding[0],
-                                  float(bbox_2d[1])/input_height-padding[1],
-                                  float(bbox_2d[2])/input_width+padding[0],
-                                  float(bbox_2d[3])/input_height+padding[1])
-        else:
-            raise ValueError(f"Invalid bounding box coordinates: {bbox_2d}. They should be integers >= 0.")
-
-    if bbox_type is None:
-        if bbox_2d[0] < 1 and bbox_2d[1] < 1 and bbox_2d[2] < 1 and bbox_2d[3] < 1:
-            normalized_bbox_2d = (float(bbox_2d[0])-padding[0],
-                                  float(bbox_2d[1])-padding[1],
-                                  float(bbox_2d[2])+padding[0],
-                                  float(bbox_2d[3])+padding[1])
-        else:
-            normalized_bbox_2d = (float(bbox_2d[0]) / input_width - padding[0],
-                                  float(bbox_2d[1]) / input_height - padding[1],
-                                  float(bbox_2d[2]) / input_width + padding[0],
-                                  float(bbox_2d[3]) / input_height + padding[1])
-
-    normalized_x1, normalized_y1, normalized_x2, normalized_y2 = normalized_bbox_2d
-    normalized_x1 =min(max(0, normalized_x1), 1)
-    normalized_y1 =min(max(0, normalized_y1), 1)
-    normalized_x2 =min(max(0, normalized_x2), 1)
-    normalized_y2 =min(max(0, normalized_y2), 1)
-    cropped_img = image.crop((int(normalized_x1*img_x),
-                              int(normalized_y1*img_y),
-                              int(normalized_x2*img_x),
-                              int(normalized_y2*img_y)))
-    w, h = cropped_img.size
-    assert w > 28 and h > 28, f"Cropped image is too small: {w}x{h}"
-
-    return cropped_img
-
-def crop_image(image_path, bbox_2d, padding=0.1, min_pixels=None, max_pixels=None):
-    """
-    Crop the image based on the bounding box coordinates.
-    """
-    image = Image.open(image_path)
-    img_x, img_y = image.size
-
-    input_height, input_width = get_resized_image_scales(img_y, img_x, min_pixels, max_pixels)
-
-    if bbox_2d[0] < 1 and bbox_2d[1] < 1 and bbox_2d[2] < 1 and bbox_2d[3] < 1:
-        normalized_bbox_2d = (float(bbox_2d[0])-padding,
-                              float(bbox_2d[1])-padding,
-                              float(bbox_2d[2])+padding,
-                              float(bbox_2d[3])+padding)
-    else:
-        normalized_bbox_2d = (float(bbox_2d[0])/input_width-padding,
-                              float(bbox_2d[1])/input_height-padding,
-                              float(bbox_2d[2])/input_width+padding,
-                              float(bbox_2d[3])/input_height+padding)
-    normalized_x1, normalized_y1, normalized_x2, normalized_y2 = normalized_bbox_2d
-    normalized_x1 =min(max(0, normalized_x1), 1)
-    normalized_y1 =min(max(0, normalized_y1), 1)
-    normalized_x2 =min(max(0, normalized_x2), 1)
-    normalized_y2 =min(max(0, normalized_y2), 1)
-    cropped_img = image.crop((normalized_x1*img_x,
-                              normalized_y1*img_y,
-                              normalized_x2*img_x,
-                              normalized_y2*img_y))
-    w, h = cropped_img.size
-    assert w > 28 and h > 28, f"Cropped image is too small: {w}x{h}"
-
-    return cropped_img
-
-def select_frames():
-    raise NotImplementedError
