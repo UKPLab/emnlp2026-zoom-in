@@ -321,7 +321,7 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 2,
             "path": "",
-            "state": "to_be_launched"
+            "state": "running"
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500_strict.json",
@@ -340,6 +340,12 @@ if __name__ == "__main__":
             "shell_number": 1,
             "path": "",
             "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500_strict_append_wrong_tool_call.json",
+            "shell_number": 3,
+            "path": "",
+            "state": "to_be_launched"
         },
 
 

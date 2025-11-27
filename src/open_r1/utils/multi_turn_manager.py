@@ -323,7 +323,7 @@ class MultiTurn:
 
         return filtered_ids
 
-    def add_user_message(self, prompts:list[dict], image_paths:list[str], mapping: list[int]=None):
+    def add_user_message(self, prompts:list[dict], image_paths:Optional[list[str]], mapping: list[int]=None):
         #logger.info(f"in add user message: prompts: {prompts}, image_paths: {image_paths}")
 
         if mapping is None:
@@ -360,7 +360,8 @@ class MultiTurn:
 
         input_ids = processed["input_ids"]
 
-        image_grid_thw_list, pixel_values_list = split_image(processed["image_grid_thw"], processed["pixel_values"])
+        if image_paths is not None:
+            image_grid_thw_list, pixel_values_list = split_image(processed["image_grid_thw"], processed["pixel_values"])
 
         # we need to make the mapping of the images with the turns, as the input list is flattened
         img_count_old = 0
@@ -368,19 +369,20 @@ class MultiTurn:
         # TODO: this fails if the user message does not contain an image path. This should only happen in the think_again text mode
         for idx in range(len(mapping)):
             self.all_multi_turn[mapping[idx]][-1].set_token_ids(input_ids[idx])
-            img_count_new = img_count_old + len(self.all_multi_turn[mapping[idx]][-1].image_token_lens)
-            self.all_multi_turn[mapping[idx]][-1].image_paths = image_paths[img_count_old:img_count_new]
-            img_sizes = []
-            for img in open_images[img_count_old:img_count_new]:
-                w, h = img.size
-                h, w = get_resized_image_scales(h, w,
-                                                self.processor.image_processor.min_pixels,
-                                                self.processor.image_processor.max_pixels)
-                img_sizes.append((w, h))
-            self.all_multi_turn[mapping[idx]][-1].image_sizes = img_sizes.copy()
-            self.all_multi_turn[mapping[idx]][-1].image_grid_thw_list = image_grid_thw_list[img_count_old:img_count_new]
-            self.all_multi_turn[mapping[idx]][-1].pixel_values_list = pixel_values_list[img_count_old:img_count_new]
-            img_count_old = img_count_new
+            if image_paths is not None:
+                img_count_new = img_count_old + len(self.all_multi_turn[mapping[idx]][-1].image_token_lens)
+                self.all_multi_turn[mapping[idx]][-1].image_paths = image_paths[img_count_old:img_count_new]
+                img_sizes = []
+                for img in open_images[img_count_old:img_count_new]:
+                    w, h = img.size
+                    h, w = get_resized_image_scales(h, w,
+                                                    self.processor.image_processor.min_pixels,
+                                                    self.processor.image_processor.max_pixels)
+                    img_sizes.append((w, h))
+                self.all_multi_turn[mapping[idx]][-1].image_sizes = img_sizes.copy()
+                self.all_multi_turn[mapping[idx]][-1].image_grid_thw_list = image_grid_thw_list[img_count_old:img_count_new]
+                self.all_multi_turn[mapping[idx]][-1].pixel_values_list = pixel_values_list[img_count_old:img_count_new]
+                img_count_old = img_count_new
 
 
 
@@ -492,7 +494,13 @@ class MultiTurn:
 
                 except Exception as e:
                     logger.info(f"Error in tool call: {e}")
-                    self.is_finished[conv_id] = True
+
+                    self.add_user_message(prompts=[{"content": [{"text": f"Error in tool call: {e}", "type": "text"}],
+                                                    "role": "user"}],
+                                          image_paths=None,
+                                          mapping=[conv_id])
+
+                    #self.is_finished[conv_id] = True
                     turn.successful_tool_call = False
             else:
                 self.is_finished[conv_id] = True
