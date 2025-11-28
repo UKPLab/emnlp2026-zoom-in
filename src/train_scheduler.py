@@ -351,13 +351,13 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 4,
             "path": "",
-            "state": "to_be_launched"
+            "state": "running"
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 5,
             "path": "",
-            "state": "wait"
+            "state": "to_be_launched"
         },
 
 
@@ -365,8 +365,8 @@ if __name__ == "__main__":
 
     for run in runs:
         if run["state"] == "to_be_launched":
-            vllm_screen_name = f"{run['shell_number']}_auto_vllm_new2"
-            train_screen_name = f"{run['shell_number']}_auto_run_new2"
+            vllm_screen_name = f"{run['shell_number']}_auto_vllm_new3"
+            train_screen_name = f"{run['shell_number']}_auto_run_new3"
 
             # Run the training pipeline
             current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
