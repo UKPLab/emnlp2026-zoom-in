@@ -322,7 +322,8 @@ class Evaluator:
             elif self.multi_turn == "tool":
 
                 multi_turn_manager.handle_tool_call(save_path=os.path.join(self.save_path, "tool_calls"),
-                                                    step=0, strict_extraction=self.strict_tool_extraction)
+                                                    step=0, strict_extraction=self.strict_tool_extraction,
+                                                    finish_after_wrong_tool_call=False)
 
 
                 for idx in range(no_conversations):

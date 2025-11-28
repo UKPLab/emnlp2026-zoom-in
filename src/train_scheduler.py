@@ -237,37 +237,37 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 2,
             "path": "",
-            "state": "running"
+            "state": ""
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 3,
             "path": "",
-            "state": "running"
+            "state": ""
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 4,
             "path": "",
-            "state":"wait"
+            "state":""
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 6,
             "path": "",
-            "state": "wait"
+            "state": ""
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_tokens_mi_sample.json",
             "shell_number": 1,
             "path": "",
-            "state": "running"
+            "state": ""
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_tokens_mi_entropy.json",
             "shell_number": 5,
             "path": "",
-            "state": "running"
+            "state": ""
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_one_tool_use.json",
@@ -291,7 +291,7 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_description.json",
             "shell_number": 7,
             "path": "",
-            "state": "running"
+            "state": ""
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_tool_name.json",
@@ -309,7 +309,7 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 6,
             "path": "",
-            "state": "running"
+            "state": ""
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_strict.json",
@@ -345,7 +345,19 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500_strict_append_wrong_tool_call.json",
             "shell_number": 3,
             "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
+            "shell_number": 4,
+            "path": "",
             "state": "to_be_launched"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500.json",
+            "shell_number": 5,
+            "path": "",
+            "state": "wait"
         },
 
 

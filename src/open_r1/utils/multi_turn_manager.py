@@ -449,7 +449,7 @@ class MultiTurn:
 
         return all_image_sizes
 
-    def handle_tool_call(self, save_path, step, strict_extraction=False):
+    def handle_tool_call(self, save_path, step, strict_extraction=False, finish_after_wrong_tool_call=True):
         image_paths = self.get_image_paths(flatten=False)
         for conv_id, turns in enumerate(self.all_multi_turn):
             if self.is_finished[conv_id]:
@@ -485,22 +485,20 @@ class MultiTurn:
                                                   image_paths=[tool_call_result["new_image_path"]],
                                                   mapping=[conv_id])
                             turn.successful_tool_call = True
-                            #self.add_message(Prompt(content=tool_call_result["output_message"],
-                            #                             role="user", successful_tool_call=True,
-                            #                             image_path=tool_call_result["new_image_path"]),
-                            #                 idx=conv_id)
                     if not correct_tool_name:
                         raise ValueError(f"Invalid tool name: {tool_params['name']}")
 
                 except Exception as e:
                     logger.info(f"Error in tool call: {e}")
 
-                    self.add_user_message(prompts=[{"content": [{"text": f"Error in tool call: {e}", "type": "text"}],
+                    if finish_after_wrong_tool_call:
+                        self.is_finished[conv_id] = True
+                    else:
+                        self.add_user_message(prompts=[{"content": [{"text": f"Error in tool call: {e}", "type": "text"}],
                                                     "role": "user"}],
                                           image_paths=None,
                                           mapping=[conv_id])
 
-                    #self.is_finished[conv_id] = True
                     turn.successful_tool_call = False
             else:
                 self.is_finished[conv_id] = True
