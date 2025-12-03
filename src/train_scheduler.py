@@ -321,13 +321,13 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 2,
             "path": "",
-            "state": "running"
+            "state": "done"
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500_strict.json",
             "shell_number": 6,
             "path": "",
-            "state": "running"
+            "state": "done"
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_5k_image_tokens_min_image_500.json",
@@ -339,13 +339,13 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_5k_image_tokens_min_image_500_strict.json",
             "shell_number": 1,
             "path": "",
-            "state": "running"
+            "state": "done"
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500_strict_append_wrong_tool_call.json",
             "shell_number": 3,
             "path": "",
-            "state": "running"
+            "state": "done"
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
@@ -357,16 +357,29 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 5,
             "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500_append_failed_tool_call.json",
+            "shell_number": 1,
+            "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_unstrict_to_strict.json",
+            "shell_number": 2,
+            "path": "",
             "state": "to_be_launched"
         },
+
 
 
     ]
 
     for run in runs:
         if run["state"] == "to_be_launched":
-            vllm_screen_name = f"{run['shell_number']}_auto_vllm_new3"
-            train_screen_name = f"{run['shell_number']}_auto_run_new3"
+            vllm_screen_name = f"{run['shell_number']}_auto_vllm_new4"
+            train_screen_name = f"{run['shell_number']}_auto_run_new4"
 
             # Run the training pipeline
             current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
