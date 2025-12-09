@@ -1001,6 +1001,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                                 min_p=0.0 if self.min_p is None else self.min_p,
                                 max_tokens=self.max_completion_length,
                                 guided_decoding_regex=self.guided_decoding_regex,
+                                stop_token_ids=[151643, 151658]
                             )
                             vllm_generation_has_worked = True
                         except Exception as e:
@@ -1049,8 +1050,8 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                         multi_turn_manager.is_finished = [True for _ in range(no_conversations)]
                 elif self.multi_turn == "tool":
 
-                    if self.state.global_step > 382:
-                        self.strict_tool_extraction = True
+                    #if self.state.global_step > 382:
+                    #    self.strict_tool_extraction = True
                     
                     multi_turn_manager.handle_tool_call(save_path=os.path.join(self.save_path, "tool_calls"),
                                                    step=self.state.global_step, strict_extraction=self.strict_tool_extraction)

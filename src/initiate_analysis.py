@@ -1326,13 +1326,62 @@ if __name__ == "__main__":
             'bbox_type': ["absolute"],
             'strict_tool_extraction': [False],
             'max_tokens_per_reply': [512],
+            "evaluate": False,  # should be True
+            "analyze": True,  # True
+            "contains_full_chkp": True,
+            "run_finished": True
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500_strict",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500_strict_20251204_001445",
+            "checkpoint": [382, 764, 1146],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["zoom_in_relative", "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["relative"],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [512],
+            "evaluate": False,  # should be True
+            "analyze": True,  # True
+            "contains_full_chkp": True,
+            "run_finished": True
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_strict",
+            "model_path": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_strict_20251203_235005",
+            "checkpoint": [382, 764, 1146],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["zoom_in_absolute", "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [512],
+            "evaluate": False,  # should be True
+            "analyze": True,  # True
+            "contains_full_chkp": True,
+            "run_finished": True
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_5k_image_tokens_min_image_500_strict",
+            "model_path": "Qwen_2p5_7B_pr_data_warm_relative_pixels_5k_image_tokens_min_image_500_strict_20251204_001805",
+            "checkpoint": [382, 764, 1146],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["zoom_in_relative", "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["relative"],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [512],
             "evaluate": True,  # should be True
             "analyze": True,  # True
             "contains_full_chkp": True,
             "run_finished": True
         },
-
-
 
 
     ]

@@ -440,6 +440,7 @@ def evaluation_process(model_path, model_class, output_path:str, tensor_parallel
         top_k=-1,
         min_p=0.0,
         max_tokens=max_tokens_per_reply,
+        stop_token_ids=[151643, 151658]
     )
 
     evaluator = Evaluator(
