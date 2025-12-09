@@ -17,6 +17,7 @@ import textwrap
 from collections import defaultdict
 from typing import Any, Callable, Optional, Union, Sized
 import time
+import random
 
 import torch
 import torch.utils.data
@@ -1282,8 +1283,13 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
             if use_mi_reward:
 
-                input_ids_mi, image_positions_mi, reduced_images_per_sample, considered_seqs = multi_turn_manager.get_shortened_sequences(
-                    remove=self.mi_mode["remove"], contrasted_area=self.mi_mode["contrasted_area"], bridge=self.mi_mode["bridge"])
+                input_ids_mi, image_positions_mi, reduced_images_per_sample, considered_seqs = multi_turn_manager.get_alternative_sequences(
+                    alternative_action=self.mi_mode["alternative_action"],
+                    answer=self.mi_mode["answer_type"],
+                    ground_truth=[random.choice(inp["solution"]) for inp in inputs])
+
+                #input_ids_mi, image_positions_mi, reduced_images_per_sample, considered_seqs = multi_turn_manager.get_shortened_sequences(
+                #    remove=self.mi_mode["remove"], contrasted_area=self.mi_mode["contrasted_area"], bridge=self.mi_mode["bridge"])
 
                 mask_mi = [[1 for _ in seq] for seq in input_ids_mi]
                 logger.info(f"mask_mi before pad: {[len(s) for s in mask_mi]}")
@@ -1305,12 +1311,6 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
                 mi_batch_size = self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier
 
-                #if mi_batch_size > len(input_ids_mi):
-                #    mi_batch_size = len(input_ids_mi)
-                #else:
-                #    while len(input_ids_mi) % mi_batch_size != 0:
-                #        mi_batch_size -= 1
-
                 logger.info(f"mi_batch_size: {mi_batch_size}")
 
                 vision_masked_per_token_logps, vision_masked_per_token_entropies = self._get_per_token_logps(mi_masked_vision_forward_model,
@@ -1326,6 +1326,8 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                     vision_masked_per_token_score = -vision_masked_per_token_entropies
                 elif self.mi_mode["contrasted_score"] == "log_probs":
                     vision_masked_per_token_score = vision_masked_per_token_logps
+                elif self.mi_mode["contrasted_score"] == "probs":
+                    vision_masked_per_token_score = torch.exp(vision_masked_per_token_logps)
                 else:
                     raise ValueError(
                         f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. Choose from ['entropy', 'log_probs']")
@@ -1335,16 +1337,22 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                         full_forward_score = -old_per_token_entropies
                     elif self.mi_mode["contrasted_score"] == "log_probs":
                         full_forward_score = old_per_token_logps
+                    elif self.mi_mode["contrasted_score"] == "probs":
+                        full_forward_score = torch.exp(old_per_token_logps)
                     else:
-                        raise ValueError(f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. Choose from ['entropy', 'log_probs']")
+                        raise ValueError(f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. "
+                                         f"Choose from ['entropy', 'log_probs', 'probs']")
                 elif self.mi_full_forward_model == "reference":
                     if self.mi_mode["contrasted_score"] == "entropy":
                         full_forward_score = -ref_per_token_entropies
                     elif self.mi_mode["contrasted_score"] == "log_probs":
                         full_forward_score = ref_per_token_logps
+                    elif self.mi_mode["contrasted_score"] == "probs":
+                        full_forward_score = torch.exp(ref_per_token_logps)
                     else:
                         raise ValueError(
-                            f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. Choose from ['entropy', 'log_probs']")
+                            f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. "
+                            f"Choose from ['entropy', 'log_probs', 'probs']")
                 else:
                     raise ValueError("mi_full_forward_model must be 'self' or 'reference'")
 
@@ -1355,20 +1363,55 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                 contrast_diff_list = []
                 for idx in range(full_forward_score.shape[0]):
                     if not considered_seqs[idx]["dummy"]:
-                        contrasted_area = considered_seqs[idx]["contrasted_area"]
-                        contrasted_area_short = considered_seqs[idx]["contrasted_area_short"]
 
-                        logger.info(f"contrasted_area: {contrasted_area}")
-                        logger.info(f"contrasted_area_short: {contrasted_area_short}")
+                        answer_position = considered_seqs[idx]["answer_position"]
+                        answer_position_short = considered_seqs[idx]["answer_position_short"]
+                        #contrasted_area = considered_seqs[idx]["contrasted_area"]
+                        #contrasted_area_short = considered_seqs[idx]["contrasted_area_short"]
 
-                        assert contrasted_area[0] > 0
-                        assert contrasted_area[1] > contrasted_area[0]
-                        assert contrasted_area_short[0] > 0
-                        assert contrasted_area_short[1] > contrasted_area_short[0]
+                        logger.info(f"answer_position: {answer_position}")
+                        logger.info(f"answer_position_short: {answer_position_short}")
 
-                        contrast_diff = (full_forward_score[idx, contrasted_area[0] - 1: contrasted_area[1] - 1] -
-                                         vision_masked_per_token_score[
-                                             idx, contrasted_area_short[0] - 1: contrasted_area_short[1] - 1])
+                        assert answer_position[0] > 0
+                        assert answer_position[1] > answer_position[0]
+                        assert answer_position_short[0] > 0
+                        assert answer_position_short[1] > answer_position_short[0]
+
+                        answer_scores_full = full_forward_score[idx,
+                                                                answer_position[0] - 1:
+                                                                answer_position[1] - 1]
+
+                        answer_scores_short = vision_masked_per_token_score[idx,
+                                                                            answer_position_short[0] - 1:
+                                                                            answer_position_short[1] - 1]
+
+                        if self.mi_mode["contrasted_score"] == "probs":
+                            answer_scores_full = torch.prod(answer_scores_full, dim = 0, keepdim=True)
+                            answer_scores_short = torch.prod(answer_scores_short, dim = 0, keepdim=True)
+
+                        if self.mi_mode["importance_sampling"] == True:
+                            alternative_action_position = considered_seqs[idx]["alternative_action_position"]
+                            alternative_action_position_short = considered_seqs[idx]["alternative_action_position_short"]
+
+                            if self.mi_mode["alternative_action"] == "second_model_generation":
+                                alt_action_scores_full = full_forward_score[idx,alternative_action_position[0]-1:
+                                                                            alternative_action_position[1]-1]
+                                alt_action_scores_full = torch.prod(alt_action_scores_full)
+                            else:
+                                alt_action_scores_full = 1
+
+                            alt_action_scores_short = vision_masked_per_token_score[idx, alternative_action_position_short[0] - 1:
+                                                                                         alternative_action_position_short[1] - 1]
+
+                            alt_action_scores_short = torch.prod(alt_action_scores_short)
+                            importance_sampling_ratio = alt_action_scores_short / alt_action_scores_full
+                        else:
+                            importance_sampling_ratio = 1
+                            
+                        contrast_diff = answer_scores_full - importance_sampling_ratio * answer_scores_short
+                        #contrast_diff = (full_forward_score[idx, contrasted_area[0] - 1: contrasted_area[1] - 1] -
+                        #                 vision_masked_per_token_score[
+                        #                     idx, contrasted_area_short[0] - 1: contrasted_area_short[1] - 1])
 
                         contrast_diff_list.append(contrast_diff.detach())
 
