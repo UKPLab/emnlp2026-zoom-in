@@ -1021,6 +1021,9 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                 logger.info(f"completions from conv round {conv_round}: {completions_token_based}")
                 logger.info(f"completion_ids from conv round {conv_round}: {completion_ids_token_based}")
 
+                truncated_generations = sum(1 for comp in completion_ids_token_based if len(comp) >= self.max_completion_length)
+                logger.info(f"from {len(completion_ids_token_based)} generations, {truncated_generations} are longer than max_completion_length={self.max_completion_length}")
+
                 completion_idx = 0
 
                 multi_turn_manager.add_model_reply(completion_ids_token_based, mapping=multi_turn_manager.get_ids(is_finished=False))
@@ -1448,6 +1451,10 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
                     else:
                         contrast_diff_list.append(None)
+                logger.info(f"override advantages: {override_advantages}")
+                mask = torch.tensor([x is not None for x in contrast_diff_list], dtype=torch.bool)
+                logger.info(f"override advantages mean: {torch.mean(override_advantages[mask], dim=0)}")
+
 
         t5 = time.time()
         self._metrics["score_time"].append(t5 - t4)
