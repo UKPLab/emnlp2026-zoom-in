@@ -1212,6 +1212,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         multimodal_inputs = {k: prompt_inputs[k] if k in prompt_inputs else None for k in multimodal_keywords}
         logger.info(f"for scoring: prompt ids: {prompt_ids.shape}")
         logger.info(f"for scoring: bs: {self.args.per_device_train_batch_size}")
+        override_advantages = None
         t4 = time.time()
         with torch.no_grad():
             # When using num_iterations == 1, old_per_token_logps == per_token_logps, so we can skip its
@@ -1361,6 +1362,9 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                 logger.info(f"full_score: {full_forward_score}")
 
                 contrast_diff_list = []
+                if self.mi_mode["use_advantages_directly"]:
+                    override_advantages = torch.zeros((full_forward_score.shape[0], 3),
+                                                      dtype=torch.float, device=device)
                 for idx in range(full_forward_score.shape[0]):
                     if not considered_seqs[idx]["dummy"]:
 
@@ -1407,7 +1411,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                             importance_sampling_ratio = alt_action_scores_short / alt_action_scores_full
                         else:
                             importance_sampling_ratio = 1
-                            
+
                         contrast_diff = answer_scores_full - importance_sampling_ratio * answer_scores_short
                         #contrast_diff = (full_forward_score[idx, contrasted_area[0] - 1: contrasted_area[1] - 1] -
                         #                 vision_masked_per_token_score[
@@ -1431,6 +1435,17 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
                         else:
                             logger.info(f"contrast diff contains no elements!")
+
+
+                        if self.mi_mode["use_advantages_directly"] == True:
+                            override_advantages[idx, 0] = contrast_diff[idx, 0]
+                            override_advantages[idx, 1] = 0
+                            if self.mi_mode["custom_advantage_position"] == "state":
+                                override_advantages[idx, 2] = alternative_action_position_short[0] - 1
+                            else:
+                                # we're currently not logging the end of the tool call...
+                                raise NotImplementedError(f"custom advantage position = state_and_action not implemented!")
+
                     else:
                         contrast_diff_list.append(None)
 
@@ -1555,7 +1570,28 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         sampling_weights = sampling_weights[process_slice]
 
         # Log the metrics
+        overall_generation_lengths = multi_turn_manager.get_model_generation_ids(lengths=True, flatten=False)
+        generation_lengths_tensor = torch.zeros((len(overall_generation_lengths), 2), dtype=torch.long, device=device)
+        for idx, seq in enumerate(overall_generation_lengths):
+            if len(seq) == 0:
+                generation_lengths_tensor[idx][0] = float('nan')
+                generation_lengths_tensor[idx][1] = float('nan')
+            elif len(seq) == 1:
+                generation_lengths_tensor[idx][0] = float(seq[0])
+                generation_lengths_tensor[idx][1] = float('nan')
+            else:
+                generation_lengths_tensor[idx][0] = float(seq[0])
+                generation_lengths_tensor[idx][1] = float(seq[1])
+
+        completion_lengths = torch.nanmean(self.accelerator.gather_for_metrics(generation_lengths_tensor), dim=0)
+
+        self._metrics["completion_length_first"] = completion_lengths[0].item()
+        self._metrics["completion_length_second"] = completion_lengths[1].item()
+
         completion_length = self.accelerator.gather_for_metrics(non_generation_mask.sum(1)).float().mean().item()
+
+
+
         self._metrics["completion_length"].append(completion_length)
 
         reward_per_func_full = self.accelerator.gather_for_metrics(rewards_per_func)
@@ -1577,6 +1613,8 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         logger.info(f"advantages: {advantages}")
         logger.info(f"sampling weights: {sampling_weights}")
 
+
+
         logger.info(f"end of updated_grpo_trainer_with_vllm")
 
         return {
@@ -1586,6 +1624,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             "old_per_token_logps": old_per_token_logps,
             "ref_per_token_logps": ref_per_token_logps,
             "advantages": advantages,
+            "override_advantages": override_advantages,
             "sampling_weights": sampling_weights,
             "multimodal_inputs": multimodal_inputs,
             "images_per_sample": images_per_sample,
@@ -1645,7 +1684,15 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         #per_token_logps = per_token_logps[:, prompt_ids.size(1) - 1:]
 
         # Get the advantages from inputs
-        advantages = inputs["advantages"]
+        raw_advantages = inputs["advantages"]
+        logger.info(f"in compute loss: raw_advantages: {raw_advantages}")
+        override_advantages = inputs["override_advantages"]
+        advantages = torch.zeros_like(per_token_logps)
+
+        for i in range(advantages.size(0)):
+            advantages[i, :] = raw_advantages[i]
+            advantages[i, int(override_advantages[i, 1]): int(override_advantages[i, 2])] = override_advantages[i, 0]
+
         logger.info(f"in compute loss: advantages: {advantages}")
 
         # When using num_iterations == 1, old_per_token_logps == per_token_logps, so we can skip its computation
@@ -1655,8 +1702,8 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         # Compute the policy ratio and clipped version
         coef_1 = torch.exp(per_token_logps - old_per_token_logps)
         coef_2 = torch.clamp(coef_1, 1 - self.epsilon, 1 + self.epsilon)
-        per_token_loss1 = coef_1 * advantages.unsqueeze(1)
-        per_token_loss2 = coef_2 * advantages.unsqueeze(1)
+        per_token_loss1 = coef_1 * advantages
+        per_token_loss2 = coef_2 * advantages
         per_token_loss = -torch.min(per_token_loss1, per_token_loss2)
 
         #ignored_tokens_mask = completion_mask * user_mask
