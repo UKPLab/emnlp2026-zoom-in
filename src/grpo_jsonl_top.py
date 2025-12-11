@@ -205,6 +205,41 @@ class GRPOScriptArguments(ScriptArguments):
         }
     )
 
+    mi_alternative_action: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": 'the alternative action to use. choose from "second_model_generation", "double_newline", "double_newline,the,answer,is"'
+        }
+    )
+
+    mi_answer_type: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "answer type: 'ground_truth', 'full_generation' or 'entropy' (first token)"
+        }
+    )
+
+    mi_use_advantages_directly: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "whether to use mi score as advantages directly and not as reward"
+        }
+    )
+
+    mi_custom_advantage_position: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "the position of the custom advantage reward. choose from 'state'."
+        }
+    )
+
+    mi_importance_sampling: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "whether to use importance sampling in the MI diff: full - IS * short"
+        }
+    )
+
     ignored_prefix_len: Optional[int] = field(
         default = None,
         metadata={
@@ -212,33 +247,33 @@ class GRPOScriptArguments(ScriptArguments):
         }
     )
 
-    mi_contrasted_area: Optional[str] = field(
-        default = None,
-        metadata={
-            "help": "which part of the sequence should be contrasted. choose from 'first_box_entry', 'first_box_entry_to_end"
-        }
-    )
+    #mi_contrasted_area: Optional[str] = field(
+    #    default = None,
+    #    metadata={
+    #        "help": "which part of the sequence should be contrasted. choose from 'first_box_entry', 'first_box_entry_to_end"
+    #    }
+    #)
 
-    mi_removed_area: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": "which part of the sequence should be removed, so the contrast is not trivial. choose from 'tool_to_box'"
-        }
-    )
+    #mi_removed_area: Optional[str] = field(
+    #    default=None,
+    #    metadata={
+    #        "help": "which part of the sequence should be removed, so the contrast is not trivial. choose from 'tool_to_box'"
+    #    }
+    #)
 
     mi_contrasted_score: Optional[str] = field(
         default="log_probs",
         metadata={
-            "help": "what to contrast. choose from ['log_probs', 'entropy']"
+            "help": "what to contrast. choose from ['log_probs', 'entropy', 'probs']"
         }
     )
 
-    mi_short_bridge: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": "what to insert after the removed area and before the contrasted area. Choose from 'double_newline', 'double_newline,the,answer,is' or None"
-        }
-    )
+    #mi_short_bridge: Optional[str] = field(
+    #    default=None,
+    #    metadata={
+    #        "help": "what to insert after the removed area and before the contrasted area. Choose from 'double_newline', 'double_newline,the,answer,is' or None"
+    #    }
+    #)
 
     training_mode: Optional[str] = field(
         default=None,
@@ -486,10 +521,13 @@ def main(script_args, training_args, model_args):
         chat_template = None
 
 
-    mi_mode = {"contrasted_area": script_args.mi_contrasted_area,
-               "remove": script_args.mi_removed_area,
+    mi_mode = {
                "contrasted_score": script_args.mi_contrasted_score,
-               "bridge": script_args.mi_short_bridge}
+               "alternative_action": script_args.mi_alternative_action,
+               "answer_type": script_args.mi_answer_type,
+               "use_advantages_directly": script_args.mi_use_advantages_directly,
+               "custom_advantage_position": script_args.mi_custom_advantage_position,
+               "importance_sampling": script_args.mi_importance_sampling,}
 
     if script_args.tool_config != "no_tool":
         tools = Tool(name=tool_args["tool_name"],

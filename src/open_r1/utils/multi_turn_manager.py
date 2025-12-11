@@ -666,7 +666,7 @@ class MultiTurn:
         considered_seqs = {}
         for idx in range(self.batch_size):
             conv = self.all_multi_turn[idx]
-            validity = self.get_alternative_sequence(conv, alternative_action, answer, tokenized_ground_truth[idx])
+            validity = self.get_alternative_sequence(copy.deepcopy(conv), alternative_action, answer, tokenized_ground_truth[idx])
             if validity is not None:
                 considered_seqs[idx] = validity
             else:
@@ -859,9 +859,9 @@ class MultiTurn:
         logger.info(f"answer position: {answer_position}")
         logger.info(f"answer position short: {answer_position_short}")
 
-        assert sequence[answer_position[0]:answer_position[1]] == alternative_sequence[
-            answer_position_short[0]:answer_position_short[
-                1]], f"the contrasted area should contain the same token ids but got full: {sequence[answer_position[0]:answer_position[1]]} and short: {alternative_sequence[answer_position_short[0]:answer_position_short[1]]} "
+        assert (sequence[answer_position[0]:answer_position[1]] ==
+                alternative_sequence[answer_position_short[0]:answer_position_short[1]]), \
+            f"the contrasted area should contain the same token ids but got full: {sequence[answer_position[0]:answer_position[1]]} and short: {alternative_sequence[answer_position_short[0]:answer_position_short[1]]} "
 
         return {"answer_position": answer_position,
         "answer_position_short": answer_position_short,

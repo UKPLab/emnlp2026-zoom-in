@@ -106,7 +106,8 @@ def is_screen_active(screen_name):
     """Check if a screen session is still running."""
     return screen_exists(screen_name)
 
-def run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, train_command, output_dir):
+def run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, train_command, output_dir, ignore_vllm=False,
+                          keep_vllm_alive=False):
     """Run the complete training pipeline."""
 
     # Create output directory if it doesn't exist
@@ -122,13 +123,14 @@ def run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, tra
     # Step 1 & 2: Start or resume VLLM server screen with CUDA_VISIBLE_DEVICES=0
     #vllm_command = f"VLLM_USE_V1=0 trl vllm-serve --model Qwen/Qwen2.5-VL-3B-Instruct --limit_image_per_prompt {images_per_prompt}"
     vllm_env = {"CUDA_VISIBLE_DEVICES": "0"}
-    
-    start_or_resume_screen(vllm_screen_name, vllm_log_file, vllm_command, vllm_env)
-    
-    # Step 4: Wait for the VLLM server to be ready
-    if not check_server_health():
-        print("VLLM server failed to start properly. Exiting.")
-        return False
+
+    if not ignore_vllm:
+        start_or_resume_screen(vllm_screen_name, vllm_log_file, vllm_command, vllm_env)
+
+        # Step 4: Wait for the VLLM server to be ready
+        if not check_server_health():
+            print("VLLM server failed to start properly. Exiting.")
+            return False
     
     # Step 5 & 6: Start or resume training screen with CUDA_VISIBLE_DEVICES set to all devices except 0
     # Get available GPUs and exclude GPU 0
@@ -163,13 +165,14 @@ def run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, tra
         print("To terminate the VLLM server manually later, run:")
         print(f"  screen -S {vllm_screen_name} -X quit")
         return True
-    
-    # Training has completed, now stop the VLLM server
-    print("Training has finished. Terminating VLLM server...")
-    if stop_screen(vllm_screen_name):
-        print("VLLM server has been terminated.")
-    else:
-        print("Failed to terminate VLLM server. You may need to stop it manually.")
+
+    if not keep_vllm_alive:
+        # Training has completed, now stop the VLLM server
+        print("Training has finished. Terminating VLLM server...")
+        if stop_screen(vllm_screen_name):
+            print("VLLM server has been terminated.")
+        else:
+            print("Failed to terminate VLLM server. You may need to stop it manually.")
     
     return True
 
@@ -327,19 +330,19 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500_strict.json",
             "shell_number": 2,
             "path": "",
-            "state": "running"
+            "state": "done"
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 7,
             "path": "",
-            "state": "running"
+            "state": "done"
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_5k_image_tokens_min_image_500_strict.json",
             "shell_number": 4,
             "path": "",
-            "state": "running"
+            "state": "done"
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500_strict_append_wrong_tool_call.json",
@@ -351,7 +354,7 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 1,
             "path": "",
-            "state": "to_be_launched"
+            "state": "running"
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500.json",
@@ -375,8 +378,30 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_strict.json",
             "shell_number": 3,
             "path": "",
+            "state": "done"
+        },
+
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_prob.json",
+            "shell_number": 3,
+            "path": "",
             "state": "running"
         },
+
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_prob_bridge.json",
+            "shell_number": 4,
+            "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_prob_bridge_scale.json",
+            "shell_number": 2,
+            "path": "",
+            "state": "to_be_launched"
+        },
+
+
     ]
 
     for run in runs:
@@ -396,4 +421,5 @@ if __name__ == "__main__":
             print(f"vllm_command: {vllm_command}")
             print(f"hf_command: {train_command}")
 
-            run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, train_command, output_dir=output_dir)
+            run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, train_command, output_dir=output_dir,
+                                  ignore_vllm=False, keep_vllm_alive=True)
