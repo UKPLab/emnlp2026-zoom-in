@@ -16,6 +16,7 @@ logger = get_logger(__name__)
 # old_per_token_logps: tensor: (num_gen, num_tokens -1)
 # ref_per_token_logps: tensor: (num_gen, num_tokens -1)
 # advantages: tensor: (num_gen)
+# override_advantages: tensor: (num_gen, 3) #first column new adv, second column start, third column end
 # multimodal_inputs: dict
 #                     pixel_values: (, 1176)
 
@@ -28,7 +29,7 @@ def _gpu_gather_object(object):
 
 class Sample:
     non_multimodal_keys = ["prompt_ids", "prompt_mask", "non_generation_mask", "old_per_token_logps",
-                           "ref_per_token_logps", "advantages", "sampling_weights"]
+                           "ref_per_token_logps", "advantages", "sampling_weights", "override_advantages"]
 
     multimodal_keys = ["num_images", "image_grid_thw", "pixel_values"]
 
@@ -38,6 +39,7 @@ class Sample:
                                "old_per_token_logps": "",
                                "ref_per_token_logps": "",
                                "advantages": "",
+                               "override_advantages": "",
                                "multimodal_inputs": {
                                    "num_images": "",
                                    "image_grid_thw": "",
@@ -51,6 +53,7 @@ class Sample:
                               "ref_per_token_logps": "",
                               "advantages": "",
                               "sampling_weights": "",
+                              "override_advantages": "",
                               "images_per_sample": "",
                               "multimodal_inputs": {
                                   "image_grid_thw": "",
@@ -58,7 +61,8 @@ class Sample:
                               }}
 
     def __init__(self, prompt_ids, prompt_mask, non_generation_mask, old_per_token_logps,
-                 ref_per_token_logps, advantages, image_grid_thw, pixel_values, images_per_sample=None, num_images=None, sampling_weights=None):
+                 ref_per_token_logps, advantages, image_grid_thw, pixel_values, images_per_sample=None, num_images=None,
+                 sampling_weights=None, override_advantages = None):
 
         self.prompt_ids: torch.tensor = prompt_ids # (num_gen, num_tokens)
         self.prompt_mask: torch.tensor = prompt_mask # (num_gen, num_tokens)
@@ -70,6 +74,11 @@ class Sample:
             self.sampling_weights: torch.tensor = advantages
         else:
             self.sampling_weights: torch.tensor = sampling_weights #(num_gen)
+
+        if override_advantages is None:
+            self.override_advantages = torch.zeros((len(advantages), 3), dtype=torch.float, device=advantages.device)
+        else:
+            self.override_advantages = override_advantages
 
         if images_per_sample is None:
             if num_images is None:
@@ -94,6 +103,7 @@ class Sample:
                       ref_per_token_logps=item['ref_per_token_logps'],
                       advantages=item['advantages'],
                       sampling_weights=item['sampling_weights'],
+                      override_advantages=item['override_advantages'],
                       images_per_sample=torch.tensor(item["images_per_sample"], dtype=torch.int,
                                            device=item['prompt_ids'].device).unsqueeze(0),
                       image_grid_thw=item['multimodal_inputs']['image_grid_thw'],
@@ -109,6 +119,7 @@ class Sample:
                 "old_per_token_logps": postprocess(self.old_per_token_logps),
                 "ref_per_token_logps": postprocess(self.ref_per_token_logps),
                 "advantages": postprocess(self.advantages),
+                "override_advantages": postprocess(self.override_advantages),
                 "multimodal_inputs": {
                     "num_images": postprocess(self.num_images),
                     "image_grid_thw": postprocess(self.image_grid_thw),
@@ -174,7 +185,7 @@ class Sample:
         self.prompt_ids = remove_left_padding_seq(self.prompt_ids, padding_id, padding_side)
         if padding_side == "left":
             for k in Sample.non_multimodal_keys:
-                if k in ["prompt_ids", "advantages", "sampling_weights"]:
+                if k in ["prompt_ids", "advantages", "sampling_weights", "override_advantages"]:
                     continue
 
                 if k in ["old_per_token_logps", "ref_per_token_logps"]:
@@ -183,7 +194,7 @@ class Sample:
                     setattr(self, k, getattr(self, k)[:, -self.prompt_ids.shape[1]:])
         elif padding_side == "right":
             for k in Sample.non_multimodal_keys:
-                if k in ["prompt_ids", "advantages", "sampling_weights"]:
+                if k in ["prompt_ids", "advantages", "sampling_weights", "override_advantages"]:
                     continue
 
                 if k in ["old_per_token_logps", "ref_per_token_logps"]:
@@ -365,7 +376,7 @@ class Buffer:
 
             if k == "prompt_ids":
                 continue
-            elif k in ["advantages", "sampling_weights"]:
+            elif k in ["advantages", "sampling_weights", "override_advantages"]:
                 combined_batch[k] = torch.cat(list_by_key, dim=0)
             else:
                 if k in ["prompt_mask", "non_generation_mask"]:

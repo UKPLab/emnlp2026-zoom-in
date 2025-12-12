@@ -248,7 +248,7 @@ def accuracy_reward(completions, solution, **kwargs):
             elif accu_reward_method == 'math':
                 reward = math_reward(content, sol)
             elif accu_reward_method == 'string_matching':
-                reward = string_matching_reward(content, sol, regex_type="box", enforce_unique=True, enforce_last=True,
+                reward = string_matching_reward(content, sol, regex_type="box", enforce_unique=True, enforce_last=False, # original PR always generates a . after the box on infovqa
                                                 match_type=kwargs.get("match_type"),
                                                 preprocess=kwargs.get("preprocess"))
             else:

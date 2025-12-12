@@ -40,15 +40,13 @@ if __name__ == "__main__":
 
     processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")
 
-
-
     mt = MultiTurn(batch_size=2, processor=processor, tools=None)
 
     mt.add_initial_user_prompt([user_simple, user_simple_2],
                                [default_image, default_image])
 
     #mt.add_model_reply([[9707,4337], [9707,220]])
-    print(f"overview: {mt.all_multi_turn}")
+    #print(f"overview: {mt.all_multi_turn}")
     #print(f"all texts: {mt.get_sequences(type="text")}")
     #print(f"all token ids: {mt.get_sequences(type="id")}")
     test_vllm = False
@@ -85,11 +83,29 @@ if __name__ == "__main__":
                                          add_special_tokens=False,
                                          return_offsets_mapping=False)
     mt.add_model_reply(assistant_box_tokenized["input_ids"], mapping=[1])
-    print(mt.all_multi_turn)
-    input_ids, positions, images_per_sample, considered_seqs = mt.get_shortened_sequences(mode="tool_and_box")
-    print(f"input_ids: {input_ids}")
-    print(f"positions: {positions}")
-    print(f"considered_seqs: {considered_seqs}")
-
+    #print(mt.all_multi_turn)
+    #input_ids, positions, images_per_sample, considered_seqs = mt.get_shortened_sequences(mode="tool_and_box")
+    #print(f"input_ids: {input_ids}")
+    #print(f"positions: {positions}")
+    #print(f"considered_seqs: {considered_seqs}")
+    out = mt.get_alternative_sequences(alternative_action="double_newline,the,answer,is", #"second_model_generation", #
+                                        answer="full_generation",
+                                        ground_truth=["\\boxed{42}",
+                                                      "\\boxed{43}"])
+    print(f"alternative result: {out}")
+    short = out[3][1]["short_sequence"]
+    long = out[3][1]["updated_original_sequence"]
+    ans_pos = out[3][1]["answer_position"]
+    ans_pos_short = out[3][1]["answer_position_short"]
+    alt_action_pos = out[3][1]["alternative_action_position"]
+    alt_action_pos_short = out[3][1]["alternative_action_position_short"]
+    print(f"short: {short}")
+    print(f"long: {long}")
+    print(f"ans_pos: {long[ans_pos[0]:ans_pos[1]]}")
+    print(f"ans_pos_short: {short[ans_pos_short[0]:ans_pos_short[1]]}")
+    print(f"alt_action: {long[alt_action_pos[0]:alt_action_pos[1]]}")
+    print(f"ans_action_short: {short[alt_action_pos_short[0]:alt_action_pos_short[1]]}")
+    as_text = processor.batch_decode([short, long])
+    print(f"as text: {as_text}")
     assistant_end = processor.apply_chat_template([user_simple, assistant_tool])
-    print(f"assistant_end: {assistant_end}")
+    #print(f"assistant_end: {assistant_end}")

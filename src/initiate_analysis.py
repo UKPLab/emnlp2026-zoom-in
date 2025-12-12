@@ -1,3 +1,4 @@
+import argparse
 import os
 
 import pandas as pd
@@ -289,6 +290,8 @@ class Evals:
 if __name__ == "__main__":
 
 
+
+
     models_input = [
         {
             "short_name": "3B_no_train",
@@ -296,10 +299,15 @@ if __name__ == "__main__":
             "checkpoint": None,
             "model_class": "Qwen/Qwen2.5-VL-3B-Instruct",
             "output_path": "Qwen_2p5_3B_no_train",
-            "tool_config_type": "no_tool",
-            "dataset_name": ["pixel_reasoner_vstar"],
+            "tool_config_type": ["zoom_in_absolute"], #"no_tool",
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            'bbox_type': [None],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [1024],
             "evaluate": False,
-            "analyze": False
+            "analyze": True
         },
         {
             "short_name": "7B_no_train",
@@ -307,10 +315,15 @@ if __name__ == "__main__":
             "checkpoint": None,
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
             "output_path": "Qwen_2p5_7B_no_train",
-            "tool_config_type": "no_tool",
-            "dataset_name": ["pixel_reasoner_vstar"],
+            "tool_config_type": ["zoom_in_absolute"], #"no_tool",
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            'bbox_type': [None],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [1024],
             "evaluate": False,
-            "analyze": False
+            "analyze": True
         },
         {
             "short_name": "PixelReasoner_original_after_SFT",
@@ -318,10 +331,15 @@ if __name__ == "__main__":
             "checkpoint": None,
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
             "output_path": "PixelReasoner_original_after_SFT",
-            "tool_config_type": "no_tool",
-            "dataset_name": ["pixel_reasoner_vstar"],
+            "tool_config_type": ["PR_crop_image_normalized,select_frames"], #"no_tool",
+            "max_pixels": [5120 * 28 * 28],
+            "min_pixels": [512 * 28 * 28],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            'bbox_type': [None],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [1024],
             "evaluate": False,
-            "analyze": False
+            "analyze": True
         },
         {
             "short_name": "PixelReasoner_original_after_RL",
@@ -329,12 +347,15 @@ if __name__ == "__main__":
             "checkpoint": None,
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
             "output_path": "PixelReasoner_original_after_RL",
-            "tool_config_type": ["no_tool", "PR_crop", "select_frames,PR_crop_original", "PR_crop_original,select_frames"],
-            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
-            "max_pixels": [None, 1000 * 28 * 28, 5120 * 28 * 28],
-            "min_pixels": [None, 512 * 28 * 28],
+            "tool_config_type": ["PR_crop_image_normalized,select_frames"], #"no_tool",
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],#, "pixel_reasoner_infovqa"],
+            'bbox_type': [None],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [1024],
+            "max_pixels": [5120 * 28 * 28],
+            "min_pixels": [512 * 28 * 28],
             "evaluate": False,
-            "analyze": False
+            "analyze": True
         },
         {
             "short_name": "cold",
@@ -1087,7 +1108,7 @@ if __name__ == "__main__":
             'strict_tool_extraction': [True],
             'max_tokens_per_reply': [256],
             "evaluate": False,
-            "analyze": True,  # True
+            "analyze": False,  # True
             "contains_full_chkp": False,
             "run_finished": True
         },
@@ -1310,7 +1331,7 @@ if __name__ == "__main__":
             'strict_tool_extraction': [False],
             'max_tokens_per_reply': [512],
             "evaluate": False,  # should be True
-            "analyze": True,  # True
+            "analyze": False,  # True
             "contains_full_chkp": True,
             "run_finished": True
         },
@@ -1326,16 +1347,102 @@ if __name__ == "__main__":
             'bbox_type': ["absolute"],
             'strict_tool_extraction': [False],
             'max_tokens_per_reply': [512],
-            "evaluate": True,  # should be True
-            "analyze": True,  # True
+            "evaluate": False,  # should be True
+            "analyze": False,  # True
+            "contains_full_chkp": True,
+            "run_finished": True
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500_strict",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500_strict_20251204_001445",
+            "checkpoint": [382, 764, 1146],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["zoom_in_relative", "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["relative"],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [512],
+            "evaluate": False,  # should be True
+            "analyze": False,  # True
+            "contains_full_chkp": True,
+            "run_finished": True
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_strict",
+            "model_path": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_strict_20251203_235005",
+            "checkpoint": [382, 764, 1146],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["zoom_in_absolute", "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [512],
+            "evaluate": False,  # should be True
+            "analyze": False,  # True
+            "contains_full_chkp": True,
+            "run_finished": True
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_5k_image_tokens_min_image_500_strict",
+            "model_path": "Qwen_2p5_7B_pr_data_warm_relative_pixels_5k_image_tokens_min_image_500_strict_20251204_001805",
+            "checkpoint": [382, 764, 1146],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["zoom_in_relative", "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["relative"],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [512],
+            "evaluate": False,  # should be True
+            "analyze": False,  # True
+            "contains_full_chkp": True,
+            "run_finished": True
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_20251204_000948",
+            "checkpoint": [382, 764, 1146],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["zoom_in_absolute", "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [512],
+            "evaluate": False,  # should be True
+            "analyze": False,  # True
             "contains_full_chkp": True,
             "run_finished": True
         },
 
 
 
-
     ]
+
+    parser = argparse.ArgumentParser(description='Evaluate VLM model performance')
+    parser.add_argument('--model_path', type=str, default=None, help='Path to the model')
+
+    args = parser.parse_args()
+
+    if args.model_path is not None:
+        found_one = False
+        for m in models_input:
+            if m["model_path"] == args.model_path:
+                m["evaluate"] = True
+                if found_one:
+                    raise ValueError(f"multiple models with the same name!")
+                else:
+                    found_one = True
+            else:
+                m["evaluate"] = False
+
+
 
     do_eval = True
     batch_eval = True
@@ -1404,7 +1511,7 @@ if __name__ == "__main__":
             #"avg_image_size",
             #"accuracy_if_tool_used",
             #"accuracy_if_tool_not_used",
-            #"tool_success_rate",
+            "tool_success_rate",
             {"metric_name": "string_matching", "metric_short_name": "ANLS",
              "match_type": "levenshtein_similarity", "preprocess": "lowercase", "cutoff": 0.5}
             # "max_image_size", "min_image_size", "median_image_size"
@@ -1422,10 +1529,10 @@ if __name__ == "__main__":
 
 
         df = all_evals.make_results_table(names=order, metrics=metrics,
-                                          fixed_params={"dataset_name": "pixel_reasoner_infovqa",
-                                                                                      "max_pixels": 5000*28*28,#1024*16*28*28, #1000*28*28, #1024*16*28*28,# 1024*16*28*28, #,# 1024*16*28*28, #1000*28*28,# 1024*16*28*28,# ,# , #1024*16*28*28,
+                                          fixed_params={"dataset_name": "pixel_reasoner_vstar",
+                                                                                      #"max_pixels": 5000*28*28,#1024*16*28*28, #1000*28*28, #1024*16*28*28,# 1024*16*28*28, #,# 1024*16*28*28, #1000*28*28,# 1024*16*28*28,# ,# , #1024*16*28*28,
                                                                                       #"min_pixels": 500 * 28 * 28,
-                                                                                      "tool_config_type": "zoom_in_relative", #"zoom_in_absolute",
+                                                                                      "tool_config_type": "zoom_in_absolute",#"PR_crop_image_normalized,select_frames"#, "zoom_in_absolute", #"PR_crop_image_normalized,select_frames", #"zoom_in_absolute", #"no_tool",#"zoom_in_relative"#"no_tool", #"zoom_in_relative", #"zoom_in_absolute",
                                                                                         #'bbox_type': "absolute",
                                                                                         #'strict_tool_extraction': True,
                                                                                         #'max_tokens_per_reply': 256

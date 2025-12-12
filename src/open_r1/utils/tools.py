@@ -40,7 +40,7 @@ TOOL_CONFIGS = {
              "tool_message_image_pos": "last",
              "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
              "tool_message_text_fillers": ["width", "height"],
-             "prompt_type": "pr_adapted"
+             "prompt_type": "pr_original"
              },
             "zoom_in_absolute":
             {   "tool_name": "zoom_in",
@@ -81,6 +81,21 @@ TOOL_CONFIGS = {
                 "tool_message_text_message": "\nHere are the selected frames (Frame Size: <width>x<height>, Numbered <start> to <end>):",
                 "tool_message_text_fillers": ["width", "height", "start", "end"],
                 "prompt_type": "pr_original"
+            },
+
+            "PR_crop_image_normalized": {
+                "tool_name": "crop_image_normalized",
+                "tool_template": "zoom_in",
+                "tool_json_customization": {"function,description": "Zoom in on the image based on the bounding box coordinates. It is useful when the object or text in the image is too small to be seen.",
+                                            "function,parameters,properties,bbox_2d,description": "coordinates for bounding box of the region you want to zoom in. Values should be within [0.0,1.0].",
+                                            "function,parameters,properties,bbox_2d,items,type": "number",
+                                            "function,parameters,properties,target_image,type": "number",
+                                            "function,name": "crop_image_normalized"},
+                "tool_message_image_pos": "last",
+                "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
+                "tool_message_text_fillers": ["width", "height"],
+                "prompt_type": "pr_original"
+
             }
 
         }
@@ -117,7 +132,7 @@ def zoom_in(image_path, bbox_2d, padding=(0.1,0.1), min_pixels=None, max_pixels=
                                   float(bbox_2d[3])+padding[1])
         else:
             raise ValueError(f"Invalid bounding box coordinates: {bbox_2d}. They should be floating point values in [0,1].")
-    if bbox_type == "absolute":
+    elif bbox_type == "absolute":
         if isinstance(bbox_2d[0], int) and isinstance(bbox_2d[1], int) and isinstance(bbox_2d[2], int) and isinstance(bbox_2d[3], int):
             normalized_bbox_2d = (float(bbox_2d[0])/input_width-padding[0],
                                   float(bbox_2d[1])/input_height-padding[1],
@@ -126,7 +141,7 @@ def zoom_in(image_path, bbox_2d, padding=(0.1,0.1), min_pixels=None, max_pixels=
         else:
             raise ValueError(f"Invalid bounding box coordinates: {bbox_2d}. They should be integers >= 0.")
 
-    if bbox_type is None:
+    else:
         if bbox_2d[0] < 1 and bbox_2d[1] < 1 and bbox_2d[2] < 1 and bbox_2d[3] < 1:
             normalized_bbox_2d = (float(bbox_2d[0])-padding[0],
                                   float(bbox_2d[1])-padding[1],
