@@ -1324,6 +1324,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                                           num_images=reduced_images_per_sample,
                                           batch_size=mi_batch_size,
                                           disable_dropout=True, return_entropies=True)
+                logger.info(f"after vision masked logp calculation")
 
                 if self.mi_mode["contrasted_score"] == "entropy":
                     vision_masked_per_token_score = -vision_masked_per_token_entropies
@@ -1341,6 +1342,9 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                         full_forward_model = model
                     elif self.mi_full_forward_model == "reference":
                         full_forward_model = self.ref_model
+                    logger.info(f"before ground_truth logp calculation")
+                    logger.info(f"input_ids_mi_updated_original: {input_ids_mi_updated_original}")
+                    logger.info(f"image_grid_thw: {multimodal_inputs["image_grid_thw"]}")
                     full_forward_per_token_logps, full_forward_per_token_entropies = self._get_per_token_logps(full_forward_model,
                                               input_ids=input_ids_mi_updated_original,
                                               attention_mask=mask_mi_updated_original,
@@ -1350,6 +1354,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                                                batch_size=self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier,
                                                disable_dropout=True,
                                                return_entropies=True)
+                    logger.info(f"after ground_truth logp calculation")
                     if self.mi_mode["contrasted_score"] == "entropy":
                         full_forward_score = -full_forward_per_token_entropies
                     elif self.mi_mode["contrasted_score"] == "log_probs":
@@ -1429,10 +1434,10 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                             answer_scores_full = torch.prod(answer_scores_full, dim = 0, keepdim=True)
                             answer_scores_short = torch.prod(answer_scores_short, dim = 0, keepdim=True)
 
-                        if self.mi_mode["importance_sampling"] == True:
-                            alternative_action_position = considered_seqs[idx]["alternative_action_position"]
-                            alternative_action_position_short = considered_seqs[idx]["alternative_action_position_short"]
+                        alternative_action_position = considered_seqs[idx]["alternative_action_position"]
+                        alternative_action_position_short = considered_seqs[idx]["alternative_action_position_short"]
 
+                        if self.mi_mode["importance_sampling"] == True:
                             logger.info(
                                 f"alternative_action_position in context: {prompt_ids[idx][alternative_action_position[0] - 3:alternative_action_position[1] + 3]}")
                             logger.info(

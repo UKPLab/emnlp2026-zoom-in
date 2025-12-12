@@ -32,8 +32,11 @@ def start_or_resume_screen(screen_name, log_file, command=None, env_vars=None):
             env_cmd = ""
             if env_vars:
                 env_cmd = " ".join([f"export {k}={v};" for k, v in env_vars.items()])
+            if log_file is None:
+                full_cmd = f"screen -S {screen_name} -X stuff '{env_cmd} {command}'"
+            else:
+                full_cmd = f"screen -S {screen_name} -X stuff '{env_cmd} {command} >> {log_file} 2>&1\n'"
 
-            full_cmd = f"screen -S {screen_name} -X stuff '{env_cmd} {command} >> {log_file} 2>&1\n'"
             subprocess.run(full_cmd, shell=True, check=True)
     else:
         print(f"Creating new screen {screen_name}")
@@ -43,7 +46,10 @@ def start_or_resume_screen(screen_name, log_file, command=None, env_vars=None):
             env_string = " ".join([f"{k}={v}" for k, v in env_vars.items()])
 
         if command:
-            screen_cmd = f"{env_string} screen -dmS {screen_name} bash -c '{command} >> {log_file} 2>&1'"
+            if log_file is None:
+                screen_cmd = f"{env_string} screen -dmS {screen_name} bash -c '{command}'"
+            else:
+                screen_cmd = f"{env_string} screen -dmS {screen_name} bash -c '{command} >> {log_file} 2>&1'"
         else:
             screen_cmd = f"{env_string} screen -dmLS {screen_name} -L -Logfile {log_file}"
 
@@ -398,8 +404,28 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_prob_bridge_scale.json",
             "shell_number": 2,
             "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_500_5k_image_mi_prob_bridge_scale.json",
+            "shell_number": 5,
+            "path": "",
             "state": "to_be_launched"
         },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_500_5k_image_mi_prob_bridge_scale.json",
+            "shell_number": 6,
+            "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_prob_bridge_scale.json",
+            "shell_number": 7,
+            "path": "",
+            "state": "running"
+        },
+
+
 
 
     ]
@@ -422,4 +448,4 @@ if __name__ == "__main__":
             print(f"hf_command: {train_command}")
 
             run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, train_command, output_dir=output_dir,
-                                  ignore_vllm=False, keep_vllm_alive=True)
+                                  ignore_vllm=False, keep_vllm_alive=False)

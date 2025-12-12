@@ -51,6 +51,10 @@ SPECIAL_TOKENS = {
     "the": {"id": 785, "text": "The"},
     "answer": {"id": 4226, "text": " answer"},
     "is": {"id": 374, "text": " is"},
+
+    "open_curly_bracket_backslash": {"id": 35702, "text": "{\\"},
+
+
 }
 
 class Turn:
@@ -687,7 +691,6 @@ class MultiTurn:
         input_ids = [v["short_sequence"] for v in considered_seqs.values()]
 
         positions = {k:v["image_turns"] for k,v in considered_seqs.items()}
-
         images_per_sample = []
         for conv_id, v in considered_seqs.items():
             images_per_conv = 0
@@ -799,6 +802,9 @@ class MultiTurn:
 
         if answer == "ground_truth":
             if ground_truth[0] == SPECIAL_TOKENS["backslash"]["id"] and ground_truth[1] == SPECIAL_TOKENS["box"]["id"] and ground_truth[2] == SPECIAL_TOKENS["open_curly_bracket"]["id"]:
+                new_conv[2].token_ids += ground_truth[3:]
+            elif ground_truth[0] == SPECIAL_TOKENS["backslash"]["id"] and ground_truth[1] == SPECIAL_TOKENS["box"]["id"] and ground_truth[2] == SPECIAL_TOKENS["open_curly_bracket_backslash"]["id"]:
+                new_conv[2].token_ids += [SPECIAL_TOKENS["backslash"]["id"]]
                 new_conv[2].token_ids += ground_truth[3:]
             else:
                 raise RuntimeError(f"ground_truth: {ground_truth} is malformed. ")
