@@ -299,7 +299,7 @@ if __name__ == "__main__":
             "checkpoint": None,
             "model_class": "Qwen/Qwen2.5-VL-3B-Instruct",
             "output_path": "Qwen_2p5_3B_no_train",
-            "tool_config_type": ["zoom_in_absolute"], #"no_tool",
+            "tool_config_type": ["zoom_in_absolute", "no_tool"],
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [500 * 28 * 28],
             "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
@@ -307,7 +307,7 @@ if __name__ == "__main__":
             'strict_tool_extraction': [False],
             'max_tokens_per_reply': [1024],
             "evaluate": False,
-            "analyze": True
+            "analyze": False
         },
         {
             "short_name": "7B_no_train",
@@ -315,7 +315,7 @@ if __name__ == "__main__":
             "checkpoint": None,
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
             "output_path": "Qwen_2p5_7B_no_train",
-            "tool_config_type": ["zoom_in_absolute"], #"no_tool",
+            "tool_config_type": ["zoom_in_absolute", "no_tool"], #,
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [500 * 28 * 28],
             "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
@@ -323,7 +323,7 @@ if __name__ == "__main__":
             'strict_tool_extraction': [False],
             'max_tokens_per_reply': [1024],
             "evaluate": False,
-            "analyze": True
+            "analyze": False
         },
         {
             "short_name": "PixelReasoner_original_after_SFT",
@@ -331,7 +331,7 @@ if __name__ == "__main__":
             "checkpoint": None,
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
             "output_path": "PixelReasoner_original_after_SFT",
-            "tool_config_type": ["PR_crop_image_normalized,select_frames"], #"no_tool",
+            "tool_config_type": ["PR_crop_image_normalized,select_frames", "no_tool"], #,
             "max_pixels": [5120 * 28 * 28],
             "min_pixels": [512 * 28 * 28],
             "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
@@ -339,7 +339,7 @@ if __name__ == "__main__":
             'strict_tool_extraction': [False],
             'max_tokens_per_reply': [1024],
             "evaluate": False,
-            "analyze": True
+            "analyze": False
         },
         {
             "short_name": "PixelReasoner_original_after_RL",
@@ -347,7 +347,7 @@ if __name__ == "__main__":
             "checkpoint": None,
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
             "output_path": "PixelReasoner_original_after_RL",
-            "tool_config_type": ["PR_crop_image_normalized,select_frames"], #"no_tool",
+            "tool_config_type": ["PR_crop_image_normalized,select_frames", "no_tool"], #"no_tool",
             "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],#, "pixel_reasoner_infovqa"],
             'bbox_type': [None],
             'strict_tool_extraction': [False],
@@ -355,7 +355,7 @@ if __name__ == "__main__":
             "max_pixels": [5120 * 28 * 28],
             "min_pixels": [512 * 28 * 28],
             "evaluate": False,
-            "analyze": True
+            "analyze": False
         },
         {
             "short_name": "cold",
@@ -1420,6 +1420,74 @@ if __name__ == "__main__":
             "contains_full_chkp": True,
             "run_finished": True
         },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_random",
+            "model_path": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_random_20251215_121302",
+            "checkpoint": [382, 764],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["zoom_in_absolute", "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [1024],
+            "evaluate": False,
+            "analyze": False,
+            "contains_full_chkp": True,
+            "run_finished": False
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou",
+            "model_path": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_20251216_010228",
+            "checkpoint": [382],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["zoom_in_absolute", "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [1024],
+            "evaluate": False,
+            "analyze": False,
+            "contains_full_chkp": True,
+            "run_finished": False
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_long_curr",
+            "model_path": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_long_curr_20251216_113951",
+            "checkpoint": [382],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["zoom_in_absolute", "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [1024],
+            "evaluate": False,
+            "analyze": False,
+            "contains_full_chkp": True,
+            "run_finished": False
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_sum",
+            "model_path": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_sum_20251217_102117",
+            "checkpoint": [382],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["zoom_in_absolute", "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [1024],
+            "evaluate": False,
+            "analyze": False,
+            "contains_full_chkp": True,
+            "run_finished": False
+        },
 
 
 
@@ -1442,12 +1510,10 @@ if __name__ == "__main__":
             else:
                 m["evaluate"] = False
 
-
-
     do_eval = True
     batch_eval = True
 
-    do_analysis = False
+    do_analysis = True
     batch_analyze = True
 
     do_metric_comparison = False
@@ -1532,7 +1598,7 @@ if __name__ == "__main__":
                                           fixed_params={"dataset_name": "pixel_reasoner_vstar",
                                                                                       #"max_pixels": 5000*28*28,#1024*16*28*28, #1000*28*28, #1024*16*28*28,# 1024*16*28*28, #,# 1024*16*28*28, #1000*28*28,# 1024*16*28*28,# ,# , #1024*16*28*28,
                                                                                       #"min_pixels": 500 * 28 * 28,
-                                                                                      "tool_config_type": "zoom_in_absolute",#"PR_crop_image_normalized,select_frames"#, "zoom_in_absolute", #"PR_crop_image_normalized,select_frames", #"zoom_in_absolute", #"no_tool",#"zoom_in_relative"#"no_tool", #"zoom_in_relative", #"zoom_in_absolute",
+                                                                                      "tool_config_type": "zoom_in_absolute", #"no_tool", #"zoom_in_absolute", #"no_tool", #"zoom_in_absolute",#"PR_crop_image_normalized,select_frames"#, "zoom_in_absolute", #"PR_crop_image_normalized,select_frames", #"zoom_in_absolute", #"no_tool",#"zoom_in_relative"#"no_tool", #"zoom_in_relative", #"zoom_in_absolute",
                                                                                         #'bbox_type': "absolute",
                                                                                         #'strict_tool_extraction': True,
                                                                                         #'max_tokens_per_reply': 256

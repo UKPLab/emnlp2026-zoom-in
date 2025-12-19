@@ -330,6 +330,8 @@ def mutual_information_reward(absolute_diff:torch.Tensor, contrasted_area: torch
                               alpha:float, length_factor_scaling:int, tau:float, discretize:bool, q:float,
                               ignored_prefix_len: int, tanh: bool, **kwargs):
 
+
+
     if ignored_prefix_len is None:
         ignored_prefix_len = 0
 
@@ -343,6 +345,8 @@ def mutual_information_reward(absolute_diff:torch.Tensor, contrasted_area: torch
                                                    discretize=discretize, q=q, tanh=tanh,
                                                    length_factor_scaling=length_factor_scaling))
     else:
+        if contrasted_area is None:
+            return None
         for i in range(len(contrasted_area)):
             reward = 0
             if len(contrasted_area[i]) > 0:

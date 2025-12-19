@@ -1,4 +1,4 @@
-
+from functools import partial
 from typing import Any, List, Optional, Sequence, Union, Tuple
 
 import numpy as np
@@ -14,6 +14,7 @@ from trl.data_utils import maybe_apply_chat_template
 from PIL import Image
 
 from .utils import get_resized_image_scales
+
 
 # Get logger for this module
 logger = get_logger(__name__)
@@ -53,6 +54,19 @@ SPECIAL_TOKENS = {
     "is": {"id": 374, "text": " is"},
 
     "open_curly_bracket_backslash": {"id": 35702, "text": "{\\"},
+
+    "open_square_bracket": {"id": 58, "text": "["},
+    "whitespace_open_square_bracket": {"id": 508, "text": " ["},
+    "quote_colon_open_square_bracket": {"id": 8899, "text": '":['},
+    "whitespace_open_square_bracket_minus": {"id": 10055, "text": " [-"},
+
+    "close_square_bracket": {"id": 60, "text": ']'},
+    "close_square_bracket_comma": {"id": 1125, "text": '],'},
+    "close_square_bracket_close_curly_bracket": {"id": 13989, "text": ']}'},
+    "close_square_bracket_comma_quote": {"id": 28503, "text": '],"'},
+
+    "comma": {"id": 11, "text": ','},
+    "whitespace": {"id": 220, "text": "Ġ"},
 
 
 }
@@ -98,13 +112,15 @@ class Turn:
 
         self.is_dummy = is_dummy
 
-    def wrap(self, type: str, full_image_pad: bool) -> Union[str, list[int]]:
+    def wrap(self, type: str, full_image_pad: bool) -> Tuple[Union[str, list[int]], int, int]:
         """ valid types are 'text' and 'id' """
         if type == "text":
             seq = (f"{SPECIAL_TOKENS['turn_start'][type]}"
                     f"{SPECIAL_TOKENS[self.role][type]}"
-                    f"{SPECIAL_TOKENS['newline'][type]}"
-                   f"{self.text}")
+                    f"{SPECIAL_TOKENS['newline'][type]}")
+            actual_turn_start = len(seq)
+            seq += f"{self.text}"
+            actual_turn_end = len(seq)
             if self.role != "assistant" or not seq.endswith(SPECIAL_TOKENS['turn_end'][type]):
                 if not self.is_dummy:
                     seq += f"{SPECIAL_TOKENS['turn_end'][type]}"
@@ -115,10 +131,12 @@ class Turn:
             seq.append(SPECIAL_TOKENS['turn_start'][type])
             seq.append(SPECIAL_TOKENS[self.role][type])
             seq.append(SPECIAL_TOKENS['newline'][type])
+            actual_turn_start = len(seq)
             if full_image_pad:
                 seq += self.token_ids
             else:
                 seq += self.token_ids_shorten_image
+            actual_turn_end = len(seq)
 
             if self.role != "assistant" or seq[-1] != SPECIAL_TOKENS['turn_end'][type]:
                 if not self.is_dummy:
@@ -126,7 +144,7 @@ class Turn:
         else:
             raise ValueError(f"Invalid turn type: {type}, choose from 'id', 'text'")
 
-        return seq
+        return seq, actual_turn_start, actual_turn_end
 
     def get_mask(self, type:str) -> list[int]:
         if type == "everything_except_model_generation":
@@ -192,8 +210,6 @@ class MultiTurn:
     def __init__(self, batch_size: int, processor, tools: Optional[list[Tool]]):
         self.batch_size = batch_size
         self.processor = processor
-
-
 
         self.tools = tools
 
@@ -327,7 +343,8 @@ class MultiTurn:
 
         return filtered_ids
 
-    def add_user_message(self, prompts:list[dict], image_paths:Optional[list[str]], mapping: list[int]=None):
+    def add_user_message(self, prompts:list[dict], image_paths:Optional[list[str]], mapping: list[int]=None,
+                         positions: list[int] = None):
         #logger.info(f"in add user message: prompts: {prompts}, image_paths: {image_paths}")
 
         if mapping is None:
@@ -349,8 +366,13 @@ class MultiTurn:
             text_image_prompts.append(text_image_prompt)
 
             user_turn = Turn(role="user", text=text_image_prompt)
-            self.all_multi_turn[mapping[idx]].append(user_turn)
+            if positions is None or positions[idx] is None:
+                self.all_multi_turn[mapping[idx]].append(user_turn)
+            else:
+                self.all_multi_turn[mapping[idx]][positions[idx]] = user_turn
 
+        if image_paths is None:
+            logger.info(f"in add_user_message: no image_paths found! this is most likely not intended unless the tool use does not yield an image")
         open_images = [Image.open(image_path) for image_path in image_paths] if image_paths is not None else None
 
         processed = self.processor(
@@ -372,10 +394,12 @@ class MultiTurn:
         img_count_new = 0
         # TODO: this fails if the user message does not contain an image path. This should only happen in the think_again text mode
         for idx in range(len(mapping)):
-            self.all_multi_turn[mapping[idx]][-1].set_token_ids(input_ids[idx])
+            position = -1 if positions is None or positions[idx] is None else positions[idx]
+
+            self.all_multi_turn[mapping[idx]][position].set_token_ids(input_ids[idx])
             if image_paths is not None:
-                img_count_new = img_count_old + len(self.all_multi_turn[mapping[idx]][-1].image_token_lens)
-                self.all_multi_turn[mapping[idx]][-1].image_paths = image_paths[img_count_old:img_count_new]
+                img_count_new = img_count_old + len(self.all_multi_turn[mapping[idx]][position].image_token_lens)
+                self.all_multi_turn[mapping[idx]][position].image_paths = image_paths[img_count_old:img_count_new]
                 img_sizes = []
                 for img in open_images[img_count_old:img_count_new]:
                     w, h = img.size
@@ -383,14 +407,14 @@ class MultiTurn:
                                                     self.processor.image_processor.min_pixels,
                                                     self.processor.image_processor.max_pixels)
                     img_sizes.append((w, h))
-                self.all_multi_turn[mapping[idx]][-1].image_sizes = img_sizes.copy()
-                self.all_multi_turn[mapping[idx]][-1].image_grid_thw_list = image_grid_thw_list[img_count_old:img_count_new]
-                self.all_multi_turn[mapping[idx]][-1].pixel_values_list = pixel_values_list[img_count_old:img_count_new]
+                self.all_multi_turn[mapping[idx]][position].image_sizes = img_sizes.copy()
+                self.all_multi_turn[mapping[idx]][position].image_grid_thw_list = image_grid_thw_list[img_count_old:img_count_new]
+                self.all_multi_turn[mapping[idx]][position].pixel_values_list = pixel_values_list[img_count_old:img_count_new]
                 img_count_old = img_count_new
 
 
 
-    def get_sequences(self, type:str, add_assistant_start:bool, full_image_pad:bool, ignore_finished:bool=False) -> Union[list[str], list[list[int]]]:
+    def get_sequences(self, type:str, add_assistant_start:bool, full_image_pad:bool, ignore_finished:bool=False, return_positions:bool=False) -> Union[list[str], list[list[int]]]:
         """
 
         Args:
@@ -403,13 +427,22 @@ class MultiTurn:
 
         """
         seqs = []
+        positions = []
         for idx in range(self.batch_size):
             if ignore_finished and self.is_finished[idx]:
                 continue
             conv = self.all_multi_turn[idx].copy()
 
-            seqs.append(get_sequence(conv, type, add_assistant_start, full_image_pad))
+            if return_positions:
+                seq, position = get_sequence(conv, type, add_assistant_start, full_image_pad, return_positions)
+                positions.append(position)
+            else:
+                seq = get_sequence(conv, type, add_assistant_start, full_image_pad)
 
+            seqs.append(seq)
+
+        if return_positions:
+            return seqs, positions
         return seqs
 
     def get_flattened_image_paths(self) -> list[list[str]]:
@@ -614,46 +647,14 @@ class MultiTurn:
 
         return np.concatenate(multimodal_list)
 
-    def get_shortened_sequences(self, remove:str, contrasted_area:str, bridge:str):
-        """
-        returns
-        inputs: list[str] ,
-        the image positions: dict[int, list[int]} ,
-        considered seqs: dict[int, dict[contrasted_area: tuple, contrasted_area_short: tuple]
-        """
-        considered_seqs = {}
-        for idx in range(self.batch_size):
-            conv = self.all_multi_turn[idx]
-            validity = self.get_shortened_sequence(conv, remove=remove, contrasted_area_name=contrasted_area, bridge=bridge)
-            if validity is not None:
-                considered_seqs[idx] = validity
-            else:
-                considered_seqs[idx] = {"contrasted_area": [0,1],
-                                        "contrasted_area_short": [0,1],
-                                        "short_sequence": get_sequence(conv, type="id",
-                                                                       add_assistant_start=False,
-                                                                       full_image_pad=True),
-                                        "image_turns": range(len(conv)),
-                                        "dummy": True}
-
-        input_ids = [v["short_sequence"] for v in considered_seqs.values()]
-
-        positions = {k:v["image_turns"] for k,v in considered_seqs.items()}
-
-        images_per_sample = []
-        for conv_id, v in considered_seqs.items():
-            images_per_conv = 0
-            for turn_id in v["image_turns"]:
-                if self.all_multi_turn[conv_id][turn_id].image_paths is not None:
-                    images_per_conv += len(self.all_multi_turn[conv_id][turn_id].image_paths)
-            images_per_sample.append(images_per_conv)
-
-        return input_ids, positions, images_per_sample, considered_seqs
-
-    def get_alternative_sequences(self, alternative_action: str, answer: str, ground_truth: list[str]):
+    def get_alternative_sequences(self, alternative_action: str, answer: str, ground_truth: list[str],
+                                  save_path: str = None,
+                                  step: int = None,
+                                  iou_target: float = None
+                                  ):
         """
         alternative_action: "second_model_generation", "double_newline",
-                            "double_newline,the,answer,is"
+                            "double_newline,the,answer,is", "alternative_tool_call"
         answer: "ground_truth", "entropy", "full_generation"
         ground_truth: tokenized ground truth solution. Is only used if answer is "ground_truth"
         """
@@ -667,44 +668,67 @@ class MultiTurn:
             return_offsets_mapping=False
         )["input_ids"]
 
+        alternative_mt_manager = copy.deepcopy(self)
         considered_seqs = {}
+        changed_idxs = [False for _ in range(self.batch_size)]
         for idx in range(self.batch_size):
             conv = self.all_multi_turn[idx]
-            validity = self.get_alternative_sequence(copy.deepcopy(conv), alternative_action, answer, tokenized_ground_truth[idx])
-            if validity is not None:
-                considered_seqs[idx] = validity
+            image_path = self.get_image_paths(flatten=False)[idx]
+            logger.info(f"before get alternative sequence for {idx}")
+            validity = self.get_alternative_sequence(alternative_mt_manager=alternative_mt_manager, idx=idx, #copy.deepcopy(conv),
+                                                     alternative_action=alternative_action, answer=answer,
+                                                     ground_truth= tokenized_ground_truth[idx], image_paths = copy.deepcopy(image_path),
+                                                     step = step, iou_target = iou_target, save_path = save_path,
+                                                     )
+            logger.info(f"after get alternative sequence for {idx}")
+
+            if alternative_action == "alternative_tool_call":
+                if validity is not None:
+                    changed_idxs[idx] = True
             else:
-                considered_seqs[idx] = {"answer_position": [0,1],
-                                        "answer_position_short": [0,1],
-                                        "alternative_action_position": [0,1],
-                                        "alternative_action_position_short": [0,1],
+                if validity is not None:
+                    considered_seqs[idx] = validity
+                else:
+                    considered_seqs[idx] = {"answer_position": [0,1],
+                                            "answer_position_short": [0,1],
+                                            "alternative_action_position": [0,1],
+                                            "alternative_action_position_short": [0,1],
 
-                                        "short_sequence": get_sequence(conv, type="id",
-                                                                       add_assistant_start=False,
-                                                                       full_image_pad=True),
-                                        "updated_original_sequence": get_sequence(conv, type="id",
-                                                                       add_assistant_start=False,
-                                                                       full_image_pad=True),
-                                        "image_turns": range(len(conv)),
-                                        "dummy": True}
+                                            "short_sequence": get_sequence(conv, type="id",
+                                                                           add_assistant_start=False,
+                                                                           full_image_pad=True),
+                                            "updated_original_sequence": get_sequence(conv, type="id",
+                                                                           add_assistant_start=False,
+                                                                           full_image_pad=True),
+                                            "image_turns": range(len(conv)),
+                                            "dummy": True}
 
-        input_ids = [v["short_sequence"] for v in considered_seqs.values()]
+        if alternative_action == "alternative_tool_call":
+            return alternative_mt_manager, changed_idxs, None, None
+        else:
+            input_ids = [v["short_sequence"] for v in considered_seqs.values()]
 
-        positions = {k:v["image_turns"] for k,v in considered_seqs.items()}
-        images_per_sample = []
-        for conv_id, v in considered_seqs.items():
-            images_per_conv = 0
-            for turn_id in v["image_turns"]:
-                if self.all_multi_turn[conv_id][turn_id].image_paths is not None:
-                    images_per_conv += len(self.all_multi_turn[conv_id][turn_id].image_paths)
-            images_per_sample.append(images_per_conv)
+            positions = {k:v["image_turns"] for k,v in considered_seqs.items()}
+            images_per_sample = []
+            for conv_id, v in considered_seqs.items():
+                images_per_conv = 0
+                for turn_id in v["image_turns"]:
+                    if self.all_multi_turn[conv_id][turn_id].image_paths is not None:
+                        images_per_conv += len(self.all_multi_turn[conv_id][turn_id].image_paths)
+                images_per_sample.append(images_per_conv)
 
-        return input_ids, positions, images_per_sample, considered_seqs
+            return input_ids, positions, images_per_sample, considered_seqs
 
-    def get_alternative_sequence(self, conv: list[Turn],
+    def get_alternative_sequence(self, #conv: list[Turn],
+                                 alternative_mt_manager,
+                                 idx: int,
                                  alternative_action: str,
                                  answer: str,
-                                 ground_truth: list[int]):
+                                 ground_truth: list[int],
+                                 image_paths: list[str] = None,
+                                 save_path: str = None,
+                                 step: int = None,
+                                 iou_target: float = None):
         """
         alternative_action: "second_model_generation", "double_newline",
                             "double_newline,the,answer,is"
@@ -732,6 +756,8 @@ class MultiTurn:
         state = "before_tool_use"
         original_action = "tool_call"
 
+        conv = alternative_mt_manager.all_multi_turn[idx]
+
         # exactly one successful tool call
         if len(conv) != 5:
             return None
@@ -741,6 +767,8 @@ class MultiTurn:
 
         # searching from behind to get the last tool call
         tool_start_idx = rindex_any(conv[2].token_ids, SPECIAL_TOKENS["tool_start"]["id"])
+
+        original_tool_call = conv[2].token_ids[tool_start_idx:]
 
         # second model response not empty
         if len(conv[4].token_ids) == 0:
@@ -759,10 +787,13 @@ class MultiTurn:
 
         new_conv = copy.deepcopy(conv)
 
-        # only keep (system, user, model)
-        new_conv = new_conv[:3]
+        if alternative_action != "alternative_tool_call":
+            # only keep (system, user, model)
+            new_conv = new_conv[:3]
         # get rid of tool call and the "." before (if applicable)
         # cutoff_idx = max(tool_start_idx - 1, 0)
+
+        #original_tool_call = conv[2].token_ids[tool_start_idx:]
 
         # get rid of tool call
         cutoff_idx = max(tool_start_idx, 0)
@@ -791,6 +822,36 @@ class MultiTurn:
                                       SPECIAL_TOKENS["open_curly_bracket"]["id"]
                                       ]
             alternative_action_len = 7
+        elif alternative_action == "alternative_tool_call":
+            if image_paths is None or save_path is None or step is None or iou_target is None:
+                raise ValueError(f"to use alternative_action=alternative_tool_call, image_paths, save_path, step and iou_target has to be given")
+            if len(self.tools) != 1:
+                # this can be extended for multiple tools, and the concrete one has to be specified by the user
+                raise ValueError(f"to use alternative_action=alternative_tool_call, we need exactly one tool")
+            alternative_tool_execution = self.get_alternative_tool_call(save_path = save_path,
+                                                                        tool_call=copy.deepcopy(conv[2].text),
+                                                                        iou_target=iou_target,
+                                                                        step=step,
+                                                                        image_paths=image_paths,
+                                                                        tool=copy.deepcopy(self.tools[0]))
+            if alternative_tool_execution is None:
+                return None
+
+            new_tool_call = replace_tool_call(original_tool_call=original_tool_call,
+                              new_bbox = alternative_tool_execution["new_bbox"],
+                              processor = self.processor)
+
+            if new_tool_call is None:
+                return None
+
+            alternative_mt_manager.add_user_message(prompts=alternative_tool_execution["prompts"],
+                                                    image_paths=alternative_tool_execution["image_paths"],
+                                                    mapping=[idx], positions=[3])
+            alternative_mt_manager.all_multi_turn[idx][2].token_ids = new_conv[2].token_ids
+            alternative_mt_manager.all_multi_turn[idx][2].token_ids += new_tool_call
+
+            return alternative_mt_manager
+
         else:
             raise ValueError(
                 f"alternative action: {alternative_action} is unsupported. "
@@ -801,20 +862,25 @@ class MultiTurn:
         updated_original_conv = copy.deepcopy(conv)
 
         if answer == "ground_truth":
-            if ground_truth[0] == SPECIAL_TOKENS["backslash"]["id"] and ground_truth[1] == SPECIAL_TOKENS["box"]["id"] and ground_truth[2] == SPECIAL_TOKENS["open_curly_bracket"]["id"]:
-                new_conv[2].token_ids += ground_truth[3:]
-            elif ground_truth[0] == SPECIAL_TOKENS["backslash"]["id"] and ground_truth[1] == SPECIAL_TOKENS["box"]["id"] and ground_truth[2] == SPECIAL_TOKENS["open_curly_bracket_backslash"]["id"]:
-                new_conv[2].token_ids += [SPECIAL_TOKENS["backslash"]["id"]]
-                new_conv[2].token_ids += ground_truth[3:]
+            #the problem is that sometimes the tokenizer concats { with the next special token, e.g. - or \
+            #that's why we can't test for the open curly bracket
+            if ground_truth[0] == SPECIAL_TOKENS["backslash"]["id"] and ground_truth[1] == SPECIAL_TOKENS["box"]["id"]:# and ground_truth[2] == SPECIAL_TOKENS["open_curly_bracket"]["id"]:
+                # get rid of boxed, {
+                new_conv[2].token_ids = new_conv[2].token_ids[:-2]
+                # add boxed and everything thereafter.
+                new_conv[2].token_ids += ground_truth[1:]
             else:
-                raise RuntimeError(f"ground_truth: {ground_truth} is malformed. ")
+                logger.info(f"ground_truth: {ground_truth} is malformed. Skipping")
+                return None
 
             # remove old answer
-            updated_original_conv[4].token_ids = conv[4].token_ids[:box_idx + 2]
+            updated_original_conv[4].token_ids = conv[4].token_ids[:box_idx]
             # insert ground truth
-            updated_original_conv[4].token_ids += ground_truth[3:]
+            updated_original_conv[4].token_ids += ground_truth[1:]
             # indices are relative and from the right
-            answer_position_begin = len(updated_original_conv[4].token_ids[box_idx + 2:])
+            # with this index we include everything right of the box, which most of the time includes the { . It should have probability close to 1 anyway.
+            # the reason is again the tokenizer problem mentioned above
+            answer_position_begin = len(updated_original_conv[4].token_ids[box_idx + 1:])
             answer_position_end = 0
 
         elif answer == "entropy":
@@ -878,132 +944,6 @@ class MultiTurn:
         "image_turns": [0, 1, 2],
         "dummy": False}
 
-
-
-    def get_shortened_sequence(self, conv: list[Turn], remove:str, contrasted_area_name: str, bridge: str) -> Optional[dict]:
-        """
-        if we have a sequence t = (t0, ..., tN)
-        remove: what part of the sequence should be removed. t_{r_start}, ..., t_{r_end}
-        contrasted_area_name: what should be contrasted. c = (t_{c_start}, ..., t_{c_end})
-        bridge: the bridge to use b = (b0, ..., bk)
-
-        Then, we will calculate
-        f(c|t) - f(c|t0, ..., t_{r_start-1}, ##removed part##
-                     t_{r_end+1}, ..., t_{c_start - 1}, b)
-
-        Importance Sampling:
-        f(c|t) - f(c|t0, ..., t_{r_start-1}, ##removed part##
-                     t_{r_end+1}, ..., t_{c_start - 1}, b)
-               * pi(|t0, ..., t_{r_start-1})
-        """
-
-        if remove == "tool_to_box":
-            # system, user, model, tool_exec, model
-
-            # the end of the reasoning chain usually looks like this:
-            # end_text = [". ", "\\", "boxed", "{", ..., "}", "<|im_end|>"]
-            # end_token = [382, 59, 79075, 90, ..., 92, 151645]
-            #
-            # the tool use looks like this:
-            # tool_text = [".",  "<tool_call>", ..., "</tool_call>", "<|im_end|>"]
-            # tool_token = [13, 151657,     ..., 151658,      151645]
-            #
-            # the idea is to replace tool_token with end_token and
-            # calculate the logp diff on [..., 92, 151645], i.e. everything after boxed{
-
-            # exactly one successful tool call
-            if len(conv) != 5:
-                return None
-            # model response was not empty
-            if len(conv[2].token_ids) == 0:
-                return None
-
-            # searching from behind to get the last tool call
-            tool_start_idx = rindex_any(conv[2].token_ids, SPECIAL_TOKENS["tool_start"]["id"])
-
-            if len(conv[4].token_ids) == 0:
-                return None
-
-            box_idx = rindex_any(conv[4].token_ids,
-                                 [SPECIAL_TOKENS["box"]["id"],
-                                               SPECIAL_TOKENS["open_curly_bracket"]["id"]])
-
-            if box_idx is None:
-                return None
-
-            new_conv = copy.deepcopy(conv)
-
-            # only keep (system, user, model)
-            new_conv = new_conv[:3]
-            # get rid of tool call and the "." before (if applicable)
-            # cutoff_idx = max(tool_start_idx - 1, 0)
-
-            # get rid of tool call
-            cutoff_idx = max(tool_start_idx, 0)
-            new_conv[2].token_ids = conv[2].token_ids[:cutoff_idx]
-
-            # between M_1^R and boxed{
-            if bridge is None:
-                new_conv[2].token_ids += [SPECIAL_TOKENS["backslash"]["id"]]
-            elif bridge == "double_newline":
-                new_conv[2].token_ids += [SPECIAL_TOKENS["double_newline"]["id"],
-                                          SPECIAL_TOKENS["backslash"]["id"],
-                                          ]
-            elif bridge == "double_newline,the,answer,is":
-                new_conv[2].token_ids += [SPECIAL_TOKENS["double_newline"]["id"],
-                                          SPECIAL_TOKENS["the"]["id"],
-                                          SPECIAL_TOKENS["answer"]["id"],
-                                          SPECIAL_TOKENS["is"]["id"],
-                                          SPECIAL_TOKENS["backslash"]["id"],
-                                          ]
-            else:
-                raise ValueError(f"bridge: {bridge} is unsupported. Choose from 'double_newline', 'double_newline,the,answer,is' or None")
-
-            # add answer
-            new_conv[2].token_ids += conv[4].token_ids[box_idx:]
-
-            # indices are relative and from the right
-            if contrasted_area_name == "first_box_entry_to_end":
-                contrasted_area_begin = len(conv[4].token_ids[box_idx+2:])
-                contrasted_area_end = 0
-            elif contrasted_area_name == "first_box_entry":
-                contrasted_area_begin = len(conv[4].token_ids[box_idx + 2:])
-                contrasted_area_end = contrasted_area_begin - 1
-            else:
-                raise ValueError(f"contrasted_area_name: {contrasted_area_name} is unsupported. Choose from 'first_box_entry_to_end' or 'first_box_entry'")
-
-            logger.info(f"contrasted_area_begin: {contrasted_area_begin}")
-            logger.info(f"contrasted_area_end: {contrasted_area_end}")
-
-            # can happen if generation ends with "\boxed{"
-            if contrasted_area_begin == 0:
-                return None
-
-            logger.info(f"short model generation: {new_conv[2].token_ids}")
-            logger.info(f"contrasted area token ids: {conv[4].token_ids[-contrasted_area_begin:len(conv[4].token_ids)-contrasted_area_end]}")
-
-            short_sequence = get_sequence(new_conv, type="id", add_assistant_start=False, full_image_pad=True)
-            sequence = get_sequence(conv, type="id", add_assistant_start=False, full_image_pad=True)
-
-            contrasted_area_short = (len(short_sequence) - contrasted_area_begin,
-                                     len(short_sequence) - contrasted_area_end)
-            contrasted_area = (len(sequence) - contrasted_area_begin,
-                               len(sequence) - contrasted_area_end)
-
-            logger.info(f"contrasted area: {contrasted_area}")
-            logger.info(f"contrasted area short: {contrasted_area_short}")
-
-            assert sequence[contrasted_area[0]:contrasted_area[1]] == short_sequence[contrasted_area_short[0]:contrasted_area_short[1]], f"the contrasted area should contain the same token ids but got full: {sequence[contrasted_area]} and short: {short_sequence[contrasted_area_short]} "
-
-        else:
-            raise ValueError(f"the given remove value {remove} is not supported. Choose from 'tool_and_box'")
-
-        return {"contrasted_area": contrasted_area,
-                "contrasted_area_short": contrasted_area_short,
-                "short_sequence": short_sequence,
-                "image_turns": [0,1,2],
-                "dummy": False}
-
     def check(self, all_multimodal_inputs: list[dict], all_multimodal_token_inputs: list[dict],
               input_text: list[str]):
         # Sanity check 1: manager_text == handler_text
@@ -1031,6 +971,46 @@ class MultiTurn:
 
             if all_multimodal_inputs[idx]["image_path"] != all_multimodal_token_inputs[idx]["image_path"]:
                 logger.debug(f"image paths are different. got: {all_multimodal_token_inputs[idx]["image_path"]} but ground truth is {all_multimodal_inputs[idx]["image_path"]}")
+
+    def get_alternative_tool_call(self, save_path: str, step:int, tool_call: str, iou_target: float, image_paths:list[str], tool: Tool) -> Optional[dict]:
+        """
+        if the tool call fails, returns None
+        otherwise, returns a dict with 'prompts' and 'image_paths', ready to be fed into self.add_user_message
+        """
+
+        if TOOL_START in tool_call or TOOL_END in tool_call:
+            try:
+                tool_params = extract_tool(tool_call, strict=True)
+                logger.info(f"tool params: {tool_params}")
+                tool_params["image_paths"] = image_paths
+
+                if (tool.name == tool_params["name"] or
+                   (tool_params["name"] == "crop_image" and tool.name == "crop_image_normalized")):
+                    tool_call_result = tool.call_tool(tool_params, save_path, generate_and_use_new_bbox={"iou_target": iou_target})
+                    logger.info(f"in get_alternative_tool_call: tool_call_result: {tool_call_result}")
+
+                    json.dump(
+                        {"original_image_path": tool_call_result["original_image_path"],
+                        "tool_input_image_path": tool_call_result["tool_input_image_path"],
+                         "tool_name": tool.name,
+                        "tool_input": tool_call_result["tool_input"],
+                        "step": step},
+                        open(os.path.join(save_path, f"{tool_call_result["new_image_id"]}.json"), "w"))
+
+                    return {"prompts": [{"content": tool_call_result["output_message"],
+                                         "role": "user"}],
+                            "image_paths": [tool_call_result["new_image_path"]],
+                            "new_bbox": tool_call_result["new_bbox"],
+                            "new_tool_input": tool_call_result["tool_input"]
+                            }
+                else:
+                    logger.info(f"alternative tool call failed because tool name {tool.name} does not match tool_params {tool_params["name"]}")
+                    return None
+
+            except Exception as e:
+                    logger.info(f"alternative tool call failed: {e}")
+                    return None
+
 
 
 def remove_image_pad(input_ids: Union[list[list[int]], list[int]], vision_start:int, vision_end:int, vision_pad:int) -> (list[list[int]], list[list[int]]):
@@ -1209,26 +1189,93 @@ def rindex_any(seq: Sequence[Any], value_or_subseq: Union[Any, Sequence[Any]]) -
             return i
     return None
 
-def get_sequence(conv: list[Turn], type: str, add_assistant_start: bool, full_image_pad: bool) -> Union[list[int], str]:
+def get_sequence(conv: list[Turn], type: str, add_assistant_start: bool, full_image_pad: bool, return_positions: bool=False) -> Union[list[int], str]:
 
     if add_assistant_start and conv[-1].role == "user":
         conv.append(Turn(role="assistant", text="", token_ids=[], token_ids_shorten_image=[], is_dummy=True))
 
     if type == "text":
         seq = SPECIAL_TOKENS["turn_separator"][type].join(
-            [turn.wrap(type, full_image_pad=full_image_pad) for turn in conv])
+            [turn.wrap(type, full_image_pad=full_image_pad)[0] for turn in conv])
 
     elif type == "id":
         seq = []
+        positions = []
         for conv_idx, turn in enumerate(conv):
-            seq += turn.wrap(type, full_image_pad=full_image_pad)
+            wrapped_turn, local_start, local_end = turn.wrap(type, full_image_pad=full_image_pad)
+            positions.append({"turn": conv_idx, "start": local_start+len(seq), "end": local_end+len(seq)})
+            seq += wrapped_turn
             if conv_idx + 2 <= len(conv):
                 seq.append(SPECIAL_TOKENS["turn_separator"][type])
     else:
         raise ValueError(f"type {type} not supported, choose from 'id' and 'text'")
 
-    return seq
+    if return_positions:
+        return seq, positions
+    else:
+        return seq
 
+
+
+def replace_tool_call(original_tool_call: list[int], new_bbox: tuple[int, int, int, int], processor) -> Optional[list[int]]:
+    """
+    tool call looks like this
+    <tool_call>{"name": "zoom_in", "arguments": {"bbox_2d" :[1113, 600, 1339, 750], "target_image":1}}</tool_call>
+    <tool_call>{"name": "zoom_in", "arguments": {"bbox_2d": [1113, 600, 1339, 750], "target_image":1}}</tool_call>
+    <tool_call>{"name": "zoom_in", "arguments": {"bbox_2d":[1113, 600, 1339, 750], "target_image":1}}</tool_call>
+
+    <tool_call>{"name": "zoom_in", "arguments": {"bbox_2d": [1113, 600, 1339, 750] , "target_image":1}}</tool_call>
+    <tool_call>{"name": "zoom_in", "arguments": {"bbox_2d": [1113, 600, 1339, 750], "target_image":1}}</tool_call>
+    <tool_call>{"name": "zoom_in", "arguments": {"target_image":1, "bbox_2d": [1113, 600, 1339, 750]}}</tool_call>
+
+    """
+    logger.info(f"original_tool_call to augment: {original_tool_call}")
+    found_bbox_start = False
+    found_bbox_end = False
+    for open_square_bracket in [SPECIAL_TOKENS["open_square_bracket"]["id"],
+                                SPECIAL_TOKENS["whitespace_open_square_bracket"]["id"],
+                                SPECIAL_TOKENS["quote_colon_open_square_bracket"]["id"],
+                                SPECIAL_TOKENS["whitespace_open_square_bracket_minus"]["id"]
+                                ]:
+        if not found_bbox_start and open_square_bracket in original_tool_call:
+            bbox_start = original_tool_call.index(open_square_bracket)
+            found_bbox_start = True
+
+    for close_square_bracket in [SPECIAL_TOKENS["close_square_bracket"]["id"],
+                                 SPECIAL_TOKENS["close_square_bracket_comma"]["id"],
+                                 SPECIAL_TOKENS["close_square_bracket_close_curly_bracket"]["id"],
+                                 SPECIAL_TOKENS["close_square_bracket_comma_quote"]["id"]
+                                 ]:
+        if not found_bbox_end and close_square_bracket in original_tool_call:
+            bbox_end = original_tool_call.index(close_square_bracket)
+            found_bbox_end = True
+
+    if not found_bbox_start or not found_bbox_end:
+        logger.info(f"bbox could not be found, no replacement")
+        return None
+
+
+    processed = processor(
+        text=[str(new_bbox[0]), str(new_bbox[1]), str(new_bbox[2]), str(new_bbox[3])],
+        images=None,
+        return_tensors=None,
+        padding=False,
+        add_special_tokens=False,
+        return_offsets_mapping=False
+    )["input_ids"]
+
+    new_tool_call = []
+    new_tool_call += original_tool_call[:bbox_start+1]
+    for i in range(4):
+        new_tool_call += processed[i]
+        if i < 3:
+            new_tool_call.append(SPECIAL_TOKENS["comma"]["id"])
+            new_tool_call.append(SPECIAL_TOKENS["whitespace"]["id"])
+    new_tool_call += original_tool_call[bbox_end:]
+
+    logger.info(f"new tool call: {new_tool_call}")
+
+    return new_tool_call
 
 
 
