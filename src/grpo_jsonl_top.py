@@ -13,8 +13,7 @@
 # limitations under the License.
 
 import os
-import subprocess
-import pathlib
+
 import json
 from dataclasses import dataclass, field, asdict
 from typing import Optional
@@ -28,7 +27,8 @@ from open_r1.utils.logger import setup_project_logging
 from open_r1.utils.tools import Tool, Message, TOOL_CONFIGS
 from open_r1.utils.rewards import curiosity_reward, pr_penalty_reward, format_reward, accuracy_reward, \
     format_reward_only_answer, mutual_information_reward, constant_exploration
-from open_r1.trainer import VLMGRPOTrainerVLLM, UpdatedVLMGRPOTrainerVLLM
+from open_r1.utils.utils import basic_iou_target_fn
+from open_r1.trainer import UpdatedVLMGRPOTrainerVLLM
 from open_r1.preprocess_data import prepare_data
 from open_r1.utils.prompts import get_question_template
 from open_r1.vlm_modules import *
@@ -352,6 +352,27 @@ class GRPOScriptArguments(ScriptArguments):
         }
     )
 
+    iou_target_zero: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "fraction at beginning of training where iou_target is zero"
+        }
+    )
+
+    iou_target_one: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "after which fraction of training the iou_target is one"
+        }
+    )
+
+    iou_target_increase: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "how the iou_target should be increased between iou_target_zero and iou_target_one. Supported: linear"
+        }
+    )
+
 
 
 
@@ -442,6 +463,13 @@ def main(script_args, training_args, model_args):
                                  "type": "per_group",
                                  "name":"constant_exploration"}
     }
+
+    # todo: refactor this to allow for variable dataset size
+    if script_args.iou_target_zero is None or script_args.iou_target_one is None or script_args.iou_target_increase is None:
+        iou_target_fn = None
+    else:
+        iou_target_fn = partial(basic_iou_target_fn, start=int(script_args.iou_target_zero * 1146),
+                            end=int(script_args.iou_target_one * 1146), increase = script_args.iou_target_increase)
 
     # Load the VLM module
     vlm_module_cls = get_vlm_module(model_args.model_name_or_path)
@@ -582,6 +610,7 @@ def main(script_args, training_args, model_args):
             mi_mode = mi_mode,
             scoring_batch_size_multiplier = script_args.scoring_batch_size_multiplier,
             exploration_pruning_schedule=exploration_pruning_schedule,
+            iou_target_fn=iou_target_fn,
         )
     else:
         trainer = trainer_cls(

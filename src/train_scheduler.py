@@ -410,7 +410,7 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_500_5k_image_mi_prob_bridge_scale.json",
             "shell_number": 5,
             "path": "",
-            "state": "to_be_launched"
+            "state": "running"
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_500_5k_image_mi_prob_bridge_scale.json",
@@ -424,6 +424,60 @@ if __name__ == "__main__":
             "path": "",
             "state": "running"
         },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou.json",
+            "shell_number": 6,
+            "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou.json",
+            "shell_number": 1,
+            "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_sum.json",
+            "shell_number": 2,
+            "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_random.json",
+            "shell_number": 3,
+            "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_long_curr.json",
+            "shell_number": 4,
+            "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
+            "shell_number": 6,
+            "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500.json",
+            "shell_number": 7,
+            "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_5k_image_tokens_min_image_500.json",
+            "shell_number": 8,
+            "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500.json",
+            "shell_number": 9,
+            "path": "",
+            "state": "to_be_launched"
+        },
 
 
 
@@ -432,8 +486,8 @@ if __name__ == "__main__":
 
     for run in runs:
         if run["state"] == "to_be_launched":
-            vllm_screen_name = f"{run['shell_number']}_auto_vllm_new4"
-            train_screen_name = f"{run['shell_number']}_auto_run_new4"
+            vllm_screen_name = f"{run['shell_number']}_auto_vllm_new2"
+            train_screen_name = f"{run['shell_number']}_auto_run_new2"
 
             # Run the training pipeline
             current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")

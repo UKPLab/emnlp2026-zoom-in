@@ -1,7 +1,7 @@
 {
   "train_params": {
     "output_dir_prefix": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs",
-    "model_name_or_path": "Qwen/Qwen2.5-VL-7B-Instruct",
+    "model_name_or_path": "TIGER-Lab/PixelReasoner-WarmStart",
     "deepspeed": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/scripts/zero3.json",
     "dataset_name": "pixel_reasoner",
     "data_file_paths": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/pixel_reasoner/RL_data_without_video/train.jsonl",
@@ -28,27 +28,33 @@
     "multi_turn": "tool",
     "reward_funcs": [
       "accuracy",
-      "pr_penalty",
-      "curiosity"
+      "mutual_information"
     ],
     "reward_func_weights": [
       1.0,
-      0.05,
-      0.5
+      0.1
     ],
-    "tool_use_penalty_threshold": 1,
-    "pixel_reasoning_threshold": 0.3,
+    "mi_alternative_action": "alternative_tool_call",
+    "mi_use_advantages_directly": false,
+    "mi_contrasted_score": "log_probs",
+    "iou_target_zero": 0.1,
+    "iou_target_one": 0.5,
+    "iou_target_increase": "linear",
+    "mutual_information_clip_value": 1.5,
+    "mi_tanh": true,
+    "mi_masked_vision_forward_model": "self",
+    "mi_full_forward_model": "self",
     "chat_template": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/qwen_chat_template_tool.json",
     "per_device_eval_batch_size": 4,
     "learning_rate": 1e-6,
     "lr_scheduler_type": "cosine",
     "warmup_ratio": 0.03,
-    "max_tool_uses": 2,
+    "max_tool_uses": 1,
     "max_pixels": 3920000,
     "min_pixels": 392000,
     "epsilon": 0.2,
-    "tool_config": "zoom_in_relative",
-    "tool_bbox_type": "relative",
+    "tool_config": "zoom_in_absolute",
+    "tool_bbox_type": "absolute",
     "strict_tool_extraction": true,
     "global_buffer": true,
     "save_strategy": "epoch",
@@ -61,7 +67,7 @@
     "min_pixels": "infer",
     "max_pixels": "infer",
     "enable_prefix_caching": true,
-    "limit_image_per_prompt": 4
+    "limit_image_per_prompt": 3
   }
 }
 

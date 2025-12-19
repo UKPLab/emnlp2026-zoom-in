@@ -4,10 +4,10 @@ if __name__ == '__main__':
     node = 3
 
     mapping_list = [
-        {"model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_20251204_000948", "gpu": 0},
-        #{"model_path": "Qwen/Qwen2.5-VL-7B-Instruct", "gpu": 1},
-        {"model_path": "TIGER-Lab/PixelReasoner-WarmStart", "gpu": 2},
-        #{"model_path": "TIGER-Lab/PixelReasoner-RL-v1", "gpu": 3},
+        {"model_path": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_random_20251215_121302", "gpu": 0},
+        {"model_path": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_20251216_010228", "gpu": 1},
+        {"model_path": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_long_curr_20251216_113951", "gpu": 2},
+        {"model_path": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_sum_20251217_102117", "gpu": 3},
     ]
 
     for mapping in mapping_list:

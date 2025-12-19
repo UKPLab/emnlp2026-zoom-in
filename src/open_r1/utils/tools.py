@@ -9,7 +9,7 @@ import copy
 from qwen_vl_utils import smart_resize
 
 from .logger import get_logger
-from .utils import get_resized_image_scales
+from .utils import get_resized_image_scales, generate_bbox_2d_new_close_iou_targeted
 
 # Get logger for this module
 logger = get_logger(__name__)
@@ -300,7 +300,7 @@ class Tool:
     def get_tool_dict(self) -> dict:
         return self.tool_dict
 
-    def call_tool(self, tool_params: dict, save_path: str = None):
+    def call_tool(self, tool_params: dict, save_path: str = None, generate_and_use_new_bbox:dict=None):
 
         tool_args = tool_params['arguments']
 
@@ -317,6 +317,21 @@ class Tool:
         #    raise ValueError(f"Invalid tool name: {tool_name}")
 
         # output_description += format_reminder
+
+        original_tool_hparams = self.callable_function.keywords
+
+        new_bbox = None
+        if generate_and_use_new_bbox is not None:
+            new_bbox = generate_bbox_2d_new_close_iou_targeted(**original_tool_hparams,
+                                                    **actual_tool_args,
+                                                    tol=0.05,
+                                                    max_tries=100,
+                                                    target_iou=generate_and_use_new_bbox["iou_target"],
+                                                    )
+            actual_tool_args["bbox_2d"] = new_bbox
+            tool_args["bbox_2d"] = new_bbox
+            logger.info(f"Generated new bbox: {new_bbox}")
+
 
         new_image = self.callable_function(**actual_tool_args)
 
@@ -350,6 +365,7 @@ class Tool:
             "new_image_path": new_image_path,
             "new_image_id": new_image_id,
             "output_message": self.message.get_content(message_args),
+            "new_bbox": new_bbox
         }
 
 def extract_tool(text:str, tool_start:str = TOOL_START, tool_end:str = TOOL_END, strict:bool = False, tool_start_position:str = "last"):
