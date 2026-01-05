@@ -18,7 +18,6 @@ from torch.utils.data import DataLoader
 import time
 import json
 from open_r1.utils.prompts import get_question_template
-import psutil
 import gc
 
 from open_r1.utils.multi_turn_manager import MultiTurn, pad

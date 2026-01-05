@@ -328,7 +328,7 @@ def constant_exploration(tool_uses, **kwargs):
 def mutual_information_reward(absolute_diff:torch.Tensor, contrasted_area: torch.Tensor, contrast_diff_list: list[torch.Tensor],
                               delta:float, gamma: float,
                               alpha:float, length_factor_scaling:int, tau:float, discretize:bool, q:float,
-                              ignored_prefix_len: int, tanh: bool, **kwargs):
+                              ignored_prefix_len: int, tanh: bool, length_factor: float, **kwargs):
 
 
 
@@ -343,7 +343,8 @@ def mutual_information_reward(absolute_diff:torch.Tensor, contrasted_area: torch
             else:
                 rewards.append(calculate_mi_reward(contrast_diff, delta = delta, gamma = gamma, alpha = alpha, tau=tau,
                                                    discretize=discretize, q=q, tanh=tanh,
-                                                   length_factor_scaling=length_factor_scaling))
+                                                   length_factor_scaling=length_factor_scaling,
+                                                   length_factor=length_factor))
     else:
         if contrasted_area is None:
             return None
@@ -357,14 +358,15 @@ def mutual_information_reward(absolute_diff:torch.Tensor, contrasted_area: torch
                     contrast_diff = absolute_diff[i, start_contrast:end_contrast]
                     reward = calculate_mi_reward(contrast_diff, delta = delta, gamma = gamma, alpha = alpha, tau=tau,
                                                discretize=discretize, q=q, tanh=tanh,
-                                               length_factor_scaling=length_factor_scaling)
+                                               length_factor_scaling=length_factor_scaling,
+                                                 length_factor=length_factor)
 
             rewards.append(reward)
     return rewards
 
 def calculate_mi_reward(contrast_diff: torch.Tensor, delta:float, gamma: float,
                         alpha:float, length_factor_scaling:int, tau:float,
-                        discretize:bool, q:float, tanh: bool):
+                        discretize:bool, q:float, tanh: bool, length_factor: float):
 
     if tau is None:
         threshold = 0
@@ -377,10 +379,14 @@ def calculate_mi_reward(contrast_diff: torch.Tensor, delta:float, gamma: float,
         if gamma is not None and delta is not None:
             raise ValueError("gamma and delta cannot be used together")
 
-        if alpha is None:
-            length_factor = 1
-        else:
-            length_factor = (len(contrast_diff) / length_factor_scaling) ** alpha
+        if alpha is not None and length_factor is not None:
+            raise ValueError("alpha and length_factor cannot be used together")
+
+        if length_factor is None:
+            if alpha is None:
+                length_factor = 1
+            else:
+                length_factor = (len(contrast_diff) / length_factor_scaling) ** alpha
 
         if delta is not None:
             reward = torch.mean(torch.where(contrast_diff > delta, 1.0, 0.0) * length_factor)

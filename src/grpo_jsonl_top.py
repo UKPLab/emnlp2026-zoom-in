@@ -176,7 +176,12 @@ class GRPOScriptArguments(ScriptArguments):
             "help": "the scale factor for length-adaptive reward: (len/len_scaling)^alpha. None means max_generation_len"
         }
     )
-
+    mutual_information_length_factor: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "the length factor to alter the full diff: 1/lf sum d_i . use together with tanh"
+        }
+    )
     mutual_information_mean_threshold: Optional[float] = field(
         default=None,
         metadata={
@@ -456,7 +461,8 @@ def main(script_args, training_args, model_args):
                                                discretize=script_args.mutual_information_discretize,
                                                q=script_args.mutual_information_quantile,
                                                ignored_prefix_len=script_args.ignored_prefix_len,
-                                               tanh=script_args.mi_tanh),
+                                               tanh=script_args.mi_tanh,
+                                               length_factor=script_args.mutual_information_length_factor),
                                "type": "per_completion",
                                "name": "mutual_information"},
         "constant_exploration": {"func": constant_exploration,
