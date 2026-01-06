@@ -545,10 +545,6 @@ if __name__ == "__main__":
             "state": "to_be_launched"
         },
 
-
-
-
-
     ]
 
     for run in runs:
@@ -569,4 +565,4 @@ if __name__ == "__main__":
             print(f"hf_command: {train_command}")
 
             run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, train_command, output_dir=output_dir,
-                                  ignore_vllm=False, keep_vllm_alive=False)
+                                  ignore_vllm=False, keep_vllm_alive=True)

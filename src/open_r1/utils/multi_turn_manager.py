@@ -828,7 +828,7 @@ class MultiTurn:
             if len(self.tools) != 1:
                 # this can be extended for multiple tools, and the concrete one has to be specified by the user
                 raise ValueError(f"to use alternative_action=alternative_tool_call, we need exactly one tool")
-            alternative_tool_execution = get_alternative_tool_call(save_path = save_path,
+            alternative_tool_execution = self.get_alternative_tool_call(save_path = save_path,
                                                                         tool_call=copy.deepcopy(conv[2].text),
                                                                         iou_target=iou_target,
                                                                         step=step,

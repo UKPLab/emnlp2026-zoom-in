@@ -424,8 +424,8 @@ def generate_bbox_2d_new_close_iou_targeted(
 
     Speed: Typically tens/hundreds of proposals; robust across target_iou in [0,1] with tol≈0.05–0.1.
     """
-    if not (0.0 <= target_iou <= 1.0):
-        raise ValueError("target_iou must be in [0,1].")
+    if not ((0.0 <= target_iou <= 1.0) or target_iou == -1.0):
+        raise ValueError("target_iou must be in [0,1] or -1.")
     if tol < 0.0:
         raise ValueError("tol must be >= 0.")
     if max_tries < 1:
@@ -456,6 +456,9 @@ def generate_bbox_2d_new_close_iou_targeted(
         input_h=float(input_h),
     )
     ref_pix = _pixel_box_from_norm(ref_final_norm, img_w, img_h)
+
+    if target_iou == -1.0:
+        return ref_pix.x1, ref_pix.y1, ref_pix.x2, ref_pix.y2
 
     rng = random.Random(seed)
 

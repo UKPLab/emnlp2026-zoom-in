@@ -142,7 +142,7 @@ class GRPOScriptArguments(ScriptArguments):
     tool_config: Optional[str] = field(
         default=None,
         metadata = {
-            "help": "pre-configured tool configuration to use"
+            "help": "pre-configured tool configuration to use. comma-separated list of tool configurations"
         }
     )
     global_buffer: Optional[bool] = field(
@@ -481,12 +481,37 @@ def main(script_args, training_args, model_args):
     vlm_module_cls = get_vlm_module(model_args.model_name_or_path)
     logger.info(f"using vlm module: {vlm_module_cls.__name__}")
 
-    tool_args = TOOL_CONFIGS[script_args.tool_config if script_args.tool_config is not None else "no_tool"]
+    #tool_args = TOOL_CONFIGS[script_args.tool_config if script_args.tool_config is not None else "no_tool"]
+    tool_args = TOOL_CONFIGS["no_tool"] if script_args.tool_config is None else [TOOL_CONFIGS[tool_config] for tool_config in script_args.tool_config.split(",")]
+
+    if script_args.tool_config != "no_tool":
+        tools = [Tool(name=tool_arg["tool_name"],
+                     template_name=tool_arg["tool_template"],
+                     json_customization=tool_arg["tool_json_customization"],
+
+                     message=Message(tool_arg["tool_message_image_pos"],
+                             tool_arg["tool_message_text_message"],
+                             tool_arg["tool_message_text_fillers"]),
+
+                     tool_hparams={"max_pixels": script_args.max_pixels,
+                                   "min_pixels": script_args.min_pixels,
+                                   "bbox_type": script_args.tool_bbox_type})
+                 for tool_arg in tool_args]
+    else:
+        tools = None
 
     #prompt_type = script_args.prompt_type + "_tool" if script_args.multi_turn == "tool" else script_args.prompt_type
     #question_prompt = vlm_module_cls.get_question_template(task_type=script_args.prompt_type)
-    question_prompt = get_question_template(task_type=script_args.prompt_type if
-    script_args.prompt_type is not None else tool_args["prompt_type"]).replace("{tool_name}", tool_args["tool_name"])
+    prompt_type = script_args.prompt_type if script_args.prompt_type is not None else tool_args[0]["prompt_type"]
+    question_prompt = get_question_template(task_type=prompt_type)
+    if tools is not None:
+        if len(tools) == 1:
+            question_prompt = question_prompt.replace("{tool_name}", tools[0].name)
+        else:
+            for idx, tool in enumerate(tools):
+                replacement_string = f"tool_name{idx + 1}"
+                tool_name = "crop_image" if tool.name == "crop_image_normalized" else tool.name
+                question_prompt = question_prompt.replace(f"{{{replacement_string}}}", tool_name)
 
 
     #reward_funcs = script_args.reward_funcs
@@ -563,20 +588,7 @@ def main(script_args, training_args, model_args):
                "custom_advantage_position": script_args.mi_custom_advantage_position,
                "importance_sampling": script_args.mi_importance_sampling,}
 
-    if script_args.tool_config != "no_tool":
-        tools = Tool(name=tool_args["tool_name"],
-                     template_name=tool_args["tool_template"],
-                     json_customization=tool_args["tool_json_customization"],
 
-             message=Message(tool_args["tool_message_image_pos"],
-                             tool_args["tool_message_text_message"],
-                             tool_args["tool_message_text_fillers"]),
-
-                     tool_hparams={"max_pixels": script_args.max_pixels,
-                                   "min_pixels": script_args.min_pixels,
-                                   "bbox_type": script_args.tool_bbox_type})
-    else:
-        tools = None
 
     if script_args.eps_tool_use_rate_threshold is not None or script_args.eps_exploration_threshold is not None:
         exploration_pruning_schedule = {"exploration_threshold": script_args.eps_exploration_threshold,

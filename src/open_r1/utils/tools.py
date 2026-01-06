@@ -332,8 +332,16 @@ class Tool:
             tool_args["bbox_2d"] = new_bbox
             logger.info(f"Generated new bbox: {new_bbox}")
 
+        if generate_and_use_new_bbox["iou_target"] == -1.0:
+            # For Black: (0, 0, 0)
+            # For White: (255, 255, 255)
+            # For Gray:  (128, 128, 128)
+            color_rgb = (0,0,0)  # Medium gray
 
-        new_image = self.callable_function(**actual_tool_args)
+            new_image = Image.new('RGB', (int(new_bbox[2] - new_bbox[0]),
+                                                    int(new_bbox[3] - new_bbox[1])), color=color_rgb)
+        else:
+            new_image = self.callable_function(**actual_tool_args)
 
         img_x, img_y = new_image.size
 

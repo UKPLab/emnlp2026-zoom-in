@@ -1661,7 +1661,7 @@ if __name__ == "__main__":
         {
             "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool",
             "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool_20260102_175500",
-            "checkpoint": [382],
+            "checkpoint": [764, 1146],
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
             "tool_config_type": ["no_tool"],
             "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
@@ -1678,7 +1678,7 @@ if __name__ == "__main__":
         {
             "short_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_random_sum",
             "model_path": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_random_sum_20260102_183643",
-            "checkpoint": [382],
+            "checkpoint": [764],
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
             "tool_config_type": ["no_tool", "zoom_in_absolute"],
             "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
@@ -1695,6 +1695,23 @@ if __name__ == "__main__":
         {
             "short_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_long_curr_sum",
             "model_path": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_long_curr_sum_20260102_183159",
+            "checkpoint": [764],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["no_tool", "zoom_in_absolute"],
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [1024],
+            "evaluate": False,
+            "analyze": True,
+            "contains_full_chkp": True,
+            "run_finished": False
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_pruning_0p025",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_pruning_0p025_20260104_181946",
             "checkpoint": [382],
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
             "tool_config_type": ["no_tool", "zoom_in_absolute"],
@@ -1709,6 +1726,7 @@ if __name__ == "__main__":
             "contains_full_chkp": True,
             "run_finished": False
         },
+
     ]
 
     parser = argparse.ArgumentParser(description='Evaluate VLM model performance')
@@ -1727,16 +1745,25 @@ if __name__ == "__main__":
                     found_one = True
             else:
                 m["evaluate"] = False
+        do_eval = True
+        batch_eval = True
 
-    do_eval = True
-    batch_eval = True
+        do_analysis = False
+        batch_analyze = False
 
-    do_analysis = False
-    batch_analyze = True
+        do_metric_comparison = False
 
-    do_metric_comparison = False
+        PMI_analysis = False
+    else:
+        do_eval = False
+        batch_eval = True
 
-    PMI_analysis = False
+        do_analysis = True
+        batch_analyze = True
+
+        do_metric_comparison = False
+
+        PMI_analysis = False
 
 
 
@@ -1816,7 +1843,7 @@ if __name__ == "__main__":
                                           fixed_params={"dataset_name": "pixel_reasoner_vstar",
                                                                                       #"max_pixels": 5000*28*28,#1024*16*28*28, #1000*28*28, #1024*16*28*28,# 1024*16*28*28, #,# 1024*16*28*28, #1000*28*28,# 1024*16*28*28,# ,# , #1024*16*28*28,
                                                                                       #"min_pixels": 500 * 28 * 28,
-                                                                                      "tool_config_type": "zoom_in_relative",#"no_tool",#"zoom_in_absolute", #"no_tool", #"zoom_in_absolute", #"no_tool", #"zoom_in_absolute",#"PR_crop_image_normalized,select_frames"#, "zoom_in_absolute", #"PR_crop_image_normalized,select_frames", #"zoom_in_absolute", #"no_tool",#"zoom_in_relative"#"no_tool", #"zoom_in_relative", #"zoom_in_absolute",
+                                                                                      "tool_config_type": "PR_crop_image_normalized,select_frames",#"no_tool",#"zoom_in_absolute", #"no_tool", #"zoom_in_absolute", #"no_tool", #"zoom_in_absolute",#"PR_crop_image_normalized,select_frames"#, "zoom_in_absolute", #"PR_crop_image_normalized,select_frames", #"zoom_in_absolute", #"no_tool",#"zoom_in_relative"#"no_tool", #"zoom_in_relative", #"zoom_in_absolute",
                                                                                         #'bbox_type': "absolute",
                                                                                         #'strict_tool_extraction': True,
                                                                                         #'max_tokens_per_reply': 256
