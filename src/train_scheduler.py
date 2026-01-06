@@ -542,6 +542,12 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_PR_after_RL_pruning_0p025.json",
             "shell_number": 8,
             "path": "",
+            "state": "running"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_pruning_if_correct_0p025.json",
+            "shell_number": 2,
+            "path": "",
             "state": "to_be_launched"
         },
 

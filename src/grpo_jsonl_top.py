@@ -26,7 +26,7 @@ import determined as det
 from open_r1.utils.logger import setup_project_logging
 from open_r1.utils.tools import Tool, Message, TOOL_CONFIGS
 from open_r1.utils.rewards import curiosity_reward, pr_penalty_reward, format_reward, accuracy_reward, \
-    format_reward_only_answer, mutual_information_reward, constant_exploration
+    format_reward_only_answer, mutual_information_reward, constant_exploration, pr_penalty_if_correct_reward
 from open_r1.utils.utils import basic_iou_target_fn
 from open_r1.trainer import UpdatedVLMGRPOTrainerVLLM
 from open_r1.preprocess_data import prepare_data
@@ -452,6 +452,10 @@ def main(script_args, training_args, model_args):
                                        tool_use_penalty_threshold=script_args.tool_use_penalty_threshold),
                        "type": "per_group",
                        "name": "pr_penalty"},
+        "pr_penalty_if_correct": {"func": partial(pr_penalty_if_correct_reward,
+                                       tool_use_penalty_threshold=script_args.tool_use_penalty_threshold),
+                       "type": "per_group",
+                       "name": "pr_penalty_if_correct"},
         "mutual_information": {"func": partial(mutual_information_reward,
                                                gamma=script_args.mutual_information_clip_value,
                                                delta=script_args.mutual_information_threshold,

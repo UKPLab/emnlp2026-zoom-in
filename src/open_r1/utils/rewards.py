@@ -322,6 +322,9 @@ def curiosity_reward(tool_uses, group_size, pixel_reasoning_threshold, **kwargs)
 def pr_penalty_reward(tool_uses, tool_use_penalty_threshold, **kwargs):
     return torch.clamp(tool_use_penalty_threshold - tool_uses, max=0)
 
+def pr_penalty_if_correct_reward(tool_uses, tool_use_penalty_threshold, accuracy_reward, **kwargs):
+    return pr_penalty_reward(tool_uses, tool_use_penalty_threshold, **kwargs) * (accuracy_reward > 0.5)
+
 def constant_exploration(tool_uses, **kwargs):
     return (tool_uses > 0).float()
 

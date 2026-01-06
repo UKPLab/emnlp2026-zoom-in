@@ -1630,8 +1630,10 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         group_rewards_per_func = torch.zeros(len(overall_tools_used), len(self.reward_funcs_per_group), device=device)
         for i, reward_func in enumerate(self.reward_funcs_per_group):
             group_rewards_per_func[:, i] = reward_func(prompts=prompts, completions=completions,
-                            tool_uses=overall_tools_used, group_size=self.num_generations,
-                        **reward_kwargs)
+                                                       tool_uses=overall_tools_used, group_size=self.num_generations,
+                                                       # assuming that the first reward is accuracy
+                                                       accuracy_reward=completion_rewards_per_func[:, 0],
+                                                       **reward_kwargs)
 
         rewards_per_func = torch.cat((completion_rewards_per_func, group_rewards_per_func), dim=1)
 
