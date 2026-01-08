@@ -8,7 +8,7 @@ path_prefix = "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/r
 #"Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_long_curr_20251216_113951"
 "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_random_sum_20260102_183643" # 2247
 "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_long_curr_sum_20260102_183159" # 2247
-run_path = "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_long_curr_sum_20260102_183159"
+run_path = "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_random_sum_20260102_183643"
 
 filepath = os.path.join(path_prefix, run_path, "run_log.txt")
 with open(filepath) as f:

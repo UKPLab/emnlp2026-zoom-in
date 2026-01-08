@@ -59,6 +59,10 @@ def parquet_to_jsonl(parquet_file_path, jsonl_file_path, dataset):
         df["image"] = df["image"].apply(lambda x: str(x.tolist()) if isinstance(x, np.ndarray) else str(x))
         df["answer"] = df["answer"].apply(lambda x: str(x.tolist()) if isinstance(x, np.ndarray) else str(x))
         df = df[['question', 'image', 'answer']]
+    elif dataset == "hr_bench_4k":
+
+    else:
+        raise NotImplementedError(f"dataset {dataset} not implemented")
 
     #df["image"] = df["image"].astype(list[str])
     print(df.head())
@@ -78,20 +82,32 @@ def parquet_to_jsonl(parquet_file_path, jsonl_file_path, dataset):
 
 if __name__ == "__main__":
 
-    remote_base = "https://huggingface.co/datasets/JasperHaozhe/InfoVQA-EvalData-PixelReasoner/resolve/main/"
-    local_base = "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/pixel_reasoner/eval/Infographics_VQA/"
+    datasets = [{"dataset_name": "pixel_reasoner_infovqa",
+                 "remote_base": "https://huggingface.co/datasets/JasperHaozhe/InfoVQA-EvalData-PixelReasoner/resolve/main/",
+                 "local_base": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/pixel_reasoner/eval/Infographics_VQA/",
+                 "parquet_file": "infographics.parquet"},
+                {"dataset_name": "hr_bench_4k",
+                 "remote_base": "https://huggingface.co/datasets/DreamMr/HR-Bench/resolve/main/",
+                 "local_base": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/pixel_reasoner/eval/HR_Bench_4k/",
+                 "parquet_file": "hr_bench_4k.parquet"}
+                ]
+
+    dataset = datasets[1]
+
+    remote_base = dataset["remote_base"]
+    local_base = dataset["local_base"]
     #os.makedirs(local_base, exist_ok=False)
 
-    zip_path = os.path.join(local_base, "images.zip")
-    parquet_path = os.path.join(local_base, "infographics.parquet")
+    #zip_path = os.path.join(local_base, "images.zip")
+    parquet_path = os.path.join(local_base, "images.parquet")
 
     #download_file(os.path.join(remote_base, "images.zip"), zip_path)
 
     #unzip_images(zip_path, local_base, delete_zip=False)
 
-    download_file(os.path.join(remote_base, "infographics.parquet"),
-                  parquet_path)
+    #download_file(os.path.join(remote_base, dataset["parquet_file"]),
+    #              parquet_path)
 
     parquet_to_jsonl(parquet_path,
                      os.path.join(local_base, "test.jsonl"),
-                     "pixel_reasoner_infovqa")
+                     dataset["dataset_name"])
