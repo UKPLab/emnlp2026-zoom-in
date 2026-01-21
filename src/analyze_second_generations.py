@@ -1,7 +1,7 @@
 import numpy as np
 import os
 
-path_prefix = "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs/"
+path_prefix = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/runs/"
 # total_matches = 2674
 # "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_sum_20251217_102117", 2674, rise between 100 and 500
 #"Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_random_20251215_121302" 2674, drop between 300 and 400, i.e. 0.25-0.35

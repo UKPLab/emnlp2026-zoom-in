@@ -1,7 +1,7 @@
 import json
 import os
 
-file = "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/scripts/zero3.json"
+file = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/scripts/zero3.json"
 
 print(os.path.exists(file))
 
@@ -32,5 +32,5 @@ def repair_json(corrupted_file_path, fixed_file_path):
     print(f"The fixed JSONL file has been saved to '{fixed_file_path}'")
 
 if __name__ == "__main__":
-    repair_json("/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train/train.jsonl",
-                "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train/train_fixed_new.jsonl")
+    repair_json("/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train/train.jsonl",
+                "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train/train_fixed_new.jsonl")

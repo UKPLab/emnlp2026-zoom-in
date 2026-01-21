@@ -113,7 +113,7 @@ def is_screen_active(screen_name):
     return screen_exists(screen_name)
 
 def run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, train_command, output_dir, ignore_vllm=False,
-                          keep_vllm_alive=False):
+                          keep_vllm_alive=False, available_gpus=None):
     """Run the complete training pipeline."""
 
     # Create output directory if it doesn't exist
@@ -128,7 +128,8 @@ def run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, tra
 
     # Step 1 & 2: Start or resume VLLM server screen with CUDA_VISIBLE_DEVICES=0
     #vllm_command = f"VLLM_USE_V1=0 trl vllm-serve --model Qwen/Qwen2.5-VL-3B-Instruct --limit_image_per_prompt {images_per_prompt}"
-    vllm_env = {"CUDA_VISIBLE_DEVICES": "0"}
+    vllm_gpu = "0" if available_gpus is None else available_gpus[0]
+    vllm_env = {"CUDA_VISIBLE_DEVICES": vllm_gpu}
 
     if not ignore_vllm:
         start_or_resume_screen(vllm_screen_name, vllm_log_file, vllm_command, vllm_env)
@@ -140,16 +141,19 @@ def run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, tra
     
     # Step 5 & 6: Start or resume training screen with CUDA_VISIBLE_DEVICES set to all devices except 0
     # Get available GPUs and exclude GPU 0
-    available_gpus = get_available_gpus()
-    if available_gpus and "0" in available_gpus:
-        available_gpus.remove("0")
+    if available_gpus is None:
+        available_gpus = get_available_gpus()
+        if "0" in available_gpus:
+            available_gpus.remove("0")
+    else:
+        available_gpus = available_gpus[1:]
     
     # Set CUDA_VISIBLE_DEVICES for training to all GPUs except 0
     cuda_devices = ",".join(available_gpus) if available_gpus else "1"  # Default to 1 if we can't detect GPUs
     train_env = {"CUDA_VISIBLE_DEVICES": cuda_devices}
 
     # Step 7: Launch the training
-    train_command = (f"cd /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src "
+    train_command = (f"cd /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src "
                      f"&& {train_command}")
     
     print(f"Starting training on GPUs: {cuda_devices}")
@@ -187,7 +191,7 @@ def signal_handler(sig, frame):
     print("\nScript interrupted by user. Exiting monitoring mode...")
     sys.exit(0)
 
-def get_commands(hparams: dict, run_name: str):
+def get_commands(hparams: dict, run_name: str, available_gpus=None, reuse_vllm=False):
 
     resume = False
     if "output_dir" in hparams["train_params"]:
@@ -197,26 +201,6 @@ def get_commands(hparams: dict, run_name: str):
         hparams["train_params"]["model_name_or_path"] = os.path.join(hparams["train_params"]["output_dir"],
                                                                      f"checkpoint-{hparams["train_params"]["resume_from_checkpoint"]}")
         hparams["train_params"].pop("resume_from_checkpoint")
-
-
-    hf_cmd = "torchrun --nproc_per_node=7 --nnodes=1 grpo_jsonl_top.py"
-    for name, value in hparams["train_params"].items():
-        if isinstance(value, list):
-            inferred_value = " ".join([str(v) for v in value])
-            inferred_name = name
-        elif name == "output_dir_prefix":
-            if resume:
-                continue
-            inferred_value = os.path.join(f"{value}", f"{run_name}_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}")
-            output_dir = inferred_value
-            inferred_name = "output_dir"
-        else:
-            inferred_name = name
-            inferred_value = value
-        hf_cmd = hf_cmd + f" --{inferred_name} {inferred_value}"
-    hf_cmd = hf_cmd + f" --run_name {run_name}"
-
-    hf_cmd = hf_cmd + f" --training_mode singlenode"
 
     vllm_cmd = "trl vllm-serve"
     for name, value in hparams["vllm_params"].items():
@@ -230,323 +214,71 @@ def get_commands(hparams: dict, run_name: str):
 
         vllm_cmd = vllm_cmd + f" --{name} {inferred_value}"
 
+    found_free_port = False
+    for vllm_port_offset in range(4):
+        if check_server_health(f"http://localhost:{8000 + vllm_port_offset}/health", max_attempts=1) and not reuse_vllm:
+            continue
+        else:
+            found_free_port = True
+            vllm_cmd = vllm_cmd + f" --port {8000 + vllm_port_offset}"
+            break
+    if not found_free_port:
+        raise Exception("No free port found for VLLM server.")
+
+    hf_cmd = f"torchrun --nproc_per_node={7 if available_gpus is None else len(available_gpus)-1} --nnodes=1 --master_port={29500 + vllm_port_offset} grpo_jsonl_top.py"
+    for name, value in hparams["train_params"].items():
+        if isinstance(value, list):
+            inferred_value = " ".join([str(v) for v in value])
+            inferred_name = name
+        elif name == "output_dir_prefix":
+            if resume:
+                continue
+            inferred_value = os.path.join(f"{value}", f"{run_name}_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}")
+            output_dir = inferred_value
+            inferred_name = "output_dir"
+        else:
+            inferred_name = name
+            inferred_value = value
+        if isinstance(inferred_value, dict):
+            inferred_value = f"\"{json.dumps(inferred_value).replace('"', '\\"')}\""
+        hf_cmd = hf_cmd + f" --{inferred_name} {inferred_value}"
+    hf_cmd = hf_cmd + f" --run_name {run_name}"
+
+    hf_cmd = hf_cmd + f" --training_mode singlenode"
+    hf_cmd = hf_cmd + f" --vllm_server_port {8000 + vllm_port_offset}"
 
 
-    return vllm_cmd, hf_cmd, output_dir
+
+
+
+    return vllm_cmd, hf_cmd, output_dir, vllm_port_offset
 
 if __name__ == "__main__":
     # Register signal handler for graceful exit
     signal.signal(signal.SIGINT, signal_handler)
 
-    script_dir = f"/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/scripts"
+    script_dir = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/scripts"
 
 
     runs = [
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500.json",
-            "shell_number": 2,
-            "path": "",
-            "state": ""
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
-            "shell_number": 3,
-            "path": "",
-            "state": ""
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500.json",
-            "shell_number": 4,
-            "path": "",
-            "state":""
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_5k_image_tokens_min_image_500.json",
-            "shell_number": 6,
-            "path": "",
-            "state": ""
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_tokens_mi_sample.json",
-            "shell_number": 1,
-            "path": "",
-            "state": ""
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_tokens_mi_entropy.json",
-            "shell_number": 5,
-            "path": "",
-            "state": ""
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_one_tool_use.json",
-            "shell_number": 7,
-            "path": "",
-            "state": "terminated"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_old_tool_name_one_tool_use.json",
-            "shell_number": 4,
-            "path": "",
-            "state": "terminated"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_old_tool_name_two_tool_uses.json",
-            "shell_number": 6,
-            "path": "",
-            "state": "terminated"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_description.json",
-            "shell_number": 7,
-            "path": "",
-            "state": ""
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_tool_name.json",
-            "shell_number": 4,
-            "path": "",
-            "state": "terminated"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_tool_float.json",
-            "shell_number": 6,
-            "path": "",
-            "state": "terminated"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500.json",
-            "shell_number": 6,
-            "path": "",
-            "state": ""
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_strict.json",
-            "shell_number": 4,
-            "path": "",
-            "state": "terminated"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500.json",
-            "shell_number": 2,
-            "path": "",
-            "state": "done"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500_strict.json",
-            "shell_number": 2,
-            "path": "",
-            "state": "done"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_5k_image_tokens_min_image_500.json",
-            "shell_number": 7,
-            "path": "",
-            "state": "done"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_5k_image_tokens_min_image_500_strict.json",
-            "shell_number": 4,
-            "path": "",
-            "state": "done"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500_strict_append_wrong_tool_call.json",
-            "shell_number": 3,
-            "path": "",
-            "state": "done"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
-            "shell_number": 1,
-            "path": "",
-            "state": "running"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500.json",
-            "shell_number": 2,
-            "path": "",
-            "state": "done"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500_append_failed_tool_call.json",
-            "shell_number": 1,
-            "path": "",
-            "state": "terminated"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_unstrict_to_strict.json",
-            "shell_number": 2,
-            "path": "",
-            "state": "terminated"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_strict.json",
-            "shell_number": 3,
-            "path": "",
-            "state": "done"
-        },
+
+
 
         {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_prob.json",
-            "shell_number": 3,
-            "path": "",
-            "state": "running"
-        },
-
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_prob_bridge.json",
-            "shell_number": 4,
-            "path": "",
-            "state": "running"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_prob_bridge_scale.json",
-            "shell_number": 2,
-            "path": "",
-            "state": "running"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_500_5k_image_mi_prob_bridge_scale.json",
-            "shell_number": 5,
-            "path": "",
-            "state": "running"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_500_5k_image_mi_prob_bridge_scale.json",
-            "shell_number": 6,
-            "path": "",
-            "state": "running"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_prob_bridge_scale.json",
-            "shell_number": 7,
-            "path": "",
-            "state": "running"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou.json",
-            "shell_number": 6,
-            "path": "",
-            "state": "finished"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou.json",
-            "shell_number": 1,
-            "path": "",
-            "state": "finished"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_sum.json",
-            "shell_number": 2,
-            "path": "",
-            "state": "finished"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_random.json",
-            "shell_number": 3,
-            "path": "",
-            "state": "finished"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_long_curr.json",
-            "shell_number": 7,
-            "path": "",
-            "state": "running"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
-            "shell_number": 6,
-            "path": "",
-            "state": "running"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500.json",
-            "shell_number": 7,
-            "path": "",
-            "state": "finished"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_relative_pixels_5k_image_tokens_min_image_500.json",
-            "shell_number": 8,
-            "path": "",
-            "state": "finished"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_relative_pixels_5k_image_tokens_min_image_500.json",
-            "shell_number": 9,
-            "path": "",
-            "state": "finished"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_pruning_0p1.json",
-            "shell_number": 8,
-            "path": "",
-            "state": "finished"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_pruning_0p4.json",
-            "shell_number": 2,
-            "path": "",
-            "state": "finished"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_pruning_0p7.json",
-            "shell_number": 3,
-            "path": "",
-            "state": "finished"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_pruning_0p075.json",
-            "shell_number": 2,
-            "path": "",
-            "state": "running"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_pruning_0p05.json",
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const.json",
             "shell_number": 1,
             "path": "",
             "state": "running"
         },
         {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_pruning_0p025.json",
-            "shell_number": 8,
-            "path": "",
-            "state": "running"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool.json",
-            "shell_number": 5,
-            "path": "",
-            "state": "running"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_random_sum.json",
-            "shell_number": 6,
-            "path": "",
-            "state": "running"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_long_curr_sum.json",
-            "shell_number": 7,
-            "path": "",
-            "state": "running"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_pruning_0p025.json",
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_long_warmup.json",
             "shell_number": 2,
             "path": "",
             "state": "running"
         },
         {
-            "json_name": "Qwen_2p5_7B_pr_data_PR_after_RL_pruning_0p025.json",
-            "shell_number": 8,
-            "path": "",
-            "state": "running"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_pruning_if_correct_0p025.json",
-            "shell_number": 2,
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_cosine_long_warmup.json",
+            "shell_number": 3,
             "path": "",
             "state": "to_be_launched"
         },
@@ -555,8 +287,11 @@ if __name__ == "__main__":
 
     for run in runs:
         if run["state"] == "to_be_launched":
-            vllm_screen_name = f"{run['shell_number']}_auto_vllm_new3"
-            train_screen_name = f"{run['shell_number']}_auto_run_new3"
+            vllm_screen_name = f"{run['shell_number']}_auto_vllm_2"
+            train_screen_name = f"{run['shell_number']}_auto_run_2"
+
+            available_gpus = None #, "2", "3", "4"]
+            reuse_vllm = True
 
             # Run the training pipeline
             current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -565,10 +300,11 @@ if __name__ == "__main__":
 
             run_name = run["json_name"].removesuffix(".json")
 
-            vllm_command, train_command, output_dir = get_commands(full_hparams, run_name)
+            vllm_command, train_command, output_dir, vllm_port_offset = get_commands(full_hparams, run_name, available_gpus, reuse_vllm)
             print(f"starting run: {run_name}")
             print(f"vllm_command: {vllm_command}")
             print(f"hf_command: {train_command}")
 
             run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, train_command, output_dir=output_dir,
-                                  ignore_vllm=False, keep_vllm_alive=True)
+                                  ignore_vllm=False, keep_vllm_alive=False,
+                                  available_gpus=available_gpus)

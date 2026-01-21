@@ -1,11 +1,11 @@
 {
   "train_params": {
-    "output_dir_prefix": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs",
-    "model_name_or_path": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs/Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_20251219_165830/checkpoint-1146",
-    "deepspeed": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/scripts/zero3.json",
+    "output_dir_prefix": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/runs",
+    "model_name_or_path": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/runs/Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_min_image_500_20251219_165830/checkpoint-1146",
+    "deepspeed": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/scripts/zero3.json",
     "dataset_name": "pixel_reasoner",
-    "data_file_paths": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/pixel_reasoner/RL_data_without_video/train.jsonl",
-    "image_folders": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/pixel_reasoner/RL_data_without_video",
+    "data_file_paths": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/pixel_reasoner/RL_data_without_video/train.jsonl",
+    "image_folders": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/pixel_reasoner/RL_data_without_video",
     "max_completion_length": 1024,
     "ds3_gather_for_generation": true,
     "use_vllm": true,
@@ -35,7 +35,7 @@
       0.4
     ],
     "tool_use_penalty_threshold": 0,
-    "chat_template": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/qwen_chat_template_tool.json",
+    "chat_template": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/qwen_chat_template_tool.json",
     "per_device_eval_batch_size": 4,
     "learning_rate": 1e-6,
     "lr_scheduler_type": "cosine",

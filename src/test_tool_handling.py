@@ -14,7 +14,7 @@ tool = Tool("crop_image", "Zoom in on the image based on the bounding box coordi
 
 conversations = Conversations(1)
 conversations.add_message(Prompt(content=[{'text':None, 'type': 'image'},{'text': 'What is this image?', 'type': 'text'}], role="user",
-                                 image_path="/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/dummy/test_img.jpeg"),
+                                 image_path="/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/dummy/test_img.jpeg"),
                           idx = 0)
 
 logger.info(f"before: {conversations.get_full_for_hf_prep()}")
@@ -22,5 +22,5 @@ logger.info(f"before: {conversations.get_full_for_hf_prep()}")
 conversations.add_message(Prompt(content=[{'text':'Let me use the tool <tool_call>{"name": "crop_image", "arguments": {"bbox_2d": [0.2, 0.2, 0.8, 0.8], "target_image": 1}}</tool_call>', "type": "text"}], role="assistant"),
                           idx = 0)
 logger.info(f"after: {conversations.get_full_for_hf_prep()}")
-conversations.handle_tool_call("/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/dummy",0, tool)
+conversations.handle_tool_call("/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/dummy",0, tool)
 logger.info(f"after tool: {conversations.get_full_for_hf_prep()}")

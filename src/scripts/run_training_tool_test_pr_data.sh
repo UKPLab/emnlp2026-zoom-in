@@ -4,12 +4,12 @@ torchrun --nproc_per_node="1" \
     --nnodes="1" \
   ../open_r1/grpo_jsonl.py \
     --run_name ${run_name} \
-    --output_dir /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs/${run_name}_$(date +%Y%m%d_%H%M%S) \
+    --output_dir /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/runs/${run_name}_$(date +%Y%m%d_%H%M%S) \
     --model_name_or_path Qwen/Qwen2.5-VL-3B-Instruct \
-    --deepspeed /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/scripts/zero3_for_testing.json \
+    --deepspeed /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/scripts/zero3_for_testing.json \
     --dataset_name pixel_reasoner \
-    --data_file_paths /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/pixel_reasoner/RL_data_without_video/train.jsonl \
-    --image_folders /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/pixel_reasoner/RL_data_without_video \
+    --data_file_paths /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/pixel_reasoner/RL_data_without_video/train.jsonl \
+    --image_folders /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/pixel_reasoner/RL_data_without_video \
     --max_completion_length 256 \
     --ds3_gather_for_generation True \
     --use_vllm True \
@@ -35,7 +35,7 @@ torchrun --nproc_per_node="1" \
     --reward_func_weights 1 1 0.05 0.5 \
     --tool_use_penalty_threshold 1 \
     --pixel_reasoning_threshold 0.3 \
-    --chat_template /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/qwen_chat_template_tool.json \
+    --chat_template /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/qwen_chat_template_tool.json \
     --learning_rate 1e-6 \
     --lr_scheduler_type cosine \
     --warmup_ratio 0.2 \

@@ -45,7 +45,7 @@ def preprocess_chartqa_original(input_path, split, output_path):
 
 
 if __name__ == "__main__":
-    input_path = "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train_full/train_augmented.json"
-    output_path = "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train_full/train_augmented_GRPO_format.json"
+    input_path = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train_full/train_augmented.json"
+    output_path = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train_full/train_augmented_GRPO_format.json"
     split = "train"
     preprocess_chartqa_original(input_path, split, output_path)

@@ -87,7 +87,8 @@ class Turn:
                  image_sizes:list[Tuple[int, int]]=None,
                  attempted_tool_call:bool = None,
                  successful_tool_call:bool = None,
-                 is_dummy:bool = False):
+                 is_dummy:bool = False,
+                 absolute_bbox:tuple[int, int, Optional[int], Optional[int]]=(0,0,None,None)):
         self.text = text
         self.role = role
 
@@ -111,6 +112,8 @@ class Turn:
         self.successful_tool_call = successful_tool_call
 
         self.is_dummy = is_dummy
+
+        self.absolute_bbox = absolute_bbox
 
     def wrap(self, type: str, full_image_pad: bool) -> Tuple[Union[str, list[int]], int, int]:
         """ valid types are 'text' and 'id' """
@@ -344,14 +347,36 @@ class MultiTurn:
         return filtered_ids
 
     def add_user_message(self, prompts:list[dict], image_paths:Optional[list[str]], mapping: list[int]=None,
-                         positions: list[int] = None):
+                         positions: list[int] = None,
+                         absolute_bbox_wrt_target_coordss: list[tuple[int, int, int, int]]=None,
+                         target_image_idxs: list[int] = None
+                         ):
         #logger.info(f"in add user message: prompts: {prompts}, image_paths: {image_paths}")
 
         if mapping is None:
             mapping = range(len(prompts))
 
+
+
         text_image_prompts = []
+        absolute_bbox_wrt_initial_coords = None
         for idx in range(len(mapping)):
+            if target_image_idxs is not None and absolute_bbox_wrt_target_coordss is not None:
+                absolute_bbox_wrt_target_coords = absolute_bbox_wrt_target_coordss[idx]
+                target_image_idx = target_image_idxs[idx]
+                image_counter = 0
+                if target_image_idx is not None and absolute_bbox_wrt_target_coords is not None:
+
+                    for turn in self.all_multi_turn[mapping[idx]]:
+                        image_count_of_turn = len(turn.image_paths) if turn.image_paths is not None else 0
+                        image_counter += image_count_of_turn
+                        if image_counter > target_image_idx:
+                            absolute_bbox_wrt_initial_coords = (absolute_bbox_wrt_target_coords[0] + turn.absolute_bbox[0],
+                                                                 absolute_bbox_wrt_target_coords[1] + turn.absolute_bbox[1],
+                                                                 absolute_bbox_wrt_target_coords[2] + turn.absolute_bbox[0],
+                                                                 absolute_bbox_wrt_target_coords[3] + turn.absolute_bbox[1])
+                            break
+
             prompt = prompts[idx]
 
             text_image_prompt = ""
@@ -365,7 +390,7 @@ class MultiTurn:
 
             text_image_prompts.append(text_image_prompt)
 
-            user_turn = Turn(role="user", text=text_image_prompt)
+            user_turn = Turn(role="user", text=text_image_prompt, absolute_bbox=absolute_bbox_wrt_initial_coords)
             if positions is None or positions[idx] is None:
                 self.all_multi_turn[mapping[idx]].append(user_turn)
             else:
@@ -486,6 +511,22 @@ class MultiTurn:
 
         return all_image_sizes
 
+    def get_absolute_bboxes(self, flatten=False)-> list[list[tuple[int, int, int, int]]]:
+        all_bboxes = []
+        for idx in range(self.batch_size):
+            bboxes = []
+            for turn in self.all_multi_turn[idx]:
+                if turn.absolute_bbox is not None and None not in [turn.absolute_bbox[0], turn.absolute_bbox[1], turn.absolute_bbox[2], turn.absolute_bbox[3]]:
+                    bboxes.append(turn.absolute_bbox)
+
+            if flatten:
+                all_bboxes += bboxes
+            else:
+                all_bboxes.append(bboxes)
+
+        return all_bboxes
+
+
     def handle_tool_call(self, save_path, step, strict_extraction=False, finish_after_wrong_tool_call=True):
         image_paths = self.get_image_paths(flatten=False)
         for conv_id, turns in enumerate(self.all_multi_turn):
@@ -520,7 +561,10 @@ class MultiTurn:
                             self.add_user_message(prompts=[{"content": tool_call_result["output_message"],
                                                             "role": "user"}],
                                                   image_paths=[tool_call_result["new_image_path"]],
-                                                  mapping=[conv_id])
+                                                  mapping=[conv_id],
+
+                                                  absolute_bbox_wrt_target_coordss = [tool_call_result["absolute_bbox_wrt_target_coords"]],
+                                                  target_image_idxs= [tool_call_result["target_image_idx"]])
                             turn.successful_tool_call = True
                     if not correct_tool_name:
                         raise ValueError(f"Invalid tool name: {tool_params['name']}")

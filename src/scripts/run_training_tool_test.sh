@@ -2,12 +2,12 @@ run_name="Qwen_2p5_3B_tool_test"
 
 RUN_ARGS=(
     --run_name ${run_name} \
-    --output_dir /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs/${run_name}_$(date +%Y%m%d_%H%M%S) \
+    --output_dir /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/runs/${run_name}_$(date +%Y%m%d_%H%M%S) \
     --model_name_or_path Qwen/Qwen2.5-VL-3B-Instruct \
-    --deepspeed /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/scripts/zero3_for_testing.json \
+    --deepspeed /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/scripts/zero3_for_testing.json \
     --dataset_name chartqa \
-    --data_file_paths /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train_full/train_augmented_GRPO_format.jsonl \
-    --image_folders /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train_full/png \
+    --data_file_paths /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train_full/train_augmented_GRPO_format.jsonl \
+    --image_folders /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train_full/png \
     --max_completion_length 256 \
     --max_prompt_length 1024 \
     --ds3_gather_for_generation True \
@@ -33,7 +33,7 @@ RUN_ARGS=(
     --reward_func_weights 1 1 0.05 0.5 \
     --tool_use_penalty_threshold 1 \
     --pixel_reasoning_threshold 0.3 \
-    --chat_template /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/qwen_chat_template_tool.json \
+    --chat_template /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/qwen_chat_template_tool.json \
     --learning_rate 1e-6 \
     --lr_scheduler_type cosine \
     --warmup_ratio 0.2 \

@@ -58,7 +58,7 @@ def main():
     """
     # Get the path from user input
     #path = input("Enter the root path to search through: ").strip()
-    path = "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs"
+    path = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/runs"
 
     if not path:
         print("No path provided. Exiting.")

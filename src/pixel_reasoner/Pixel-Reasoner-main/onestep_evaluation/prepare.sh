@@ -1,7 +1,7 @@
 set -x
 dataname=${1} # hfname VStar-EvalData-PixelReasoner
 hfuser=${hfuser:-"JasperHaozhe"}
-working_dir=/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/pixel_reasoner
+working_dir=/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/pixel_reasoner
 if [[ ! -f "hfd.sh" ]]; then
     echo "downloading hfd.sh"
     

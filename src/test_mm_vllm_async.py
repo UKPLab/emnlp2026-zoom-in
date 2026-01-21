@@ -25,7 +25,7 @@ def main():
     prompts = [{"prompt": text,
             "image_path":
                 {"image": #PIL.Image.open(
-                    "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train_full/png/png/two_col_22791.png"
+                    "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train_full/png/png/two_col_22791.png"
 #)
 }}]
     """

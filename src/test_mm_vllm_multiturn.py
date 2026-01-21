@@ -6,7 +6,7 @@ from vllm import LLM
 import PIL.Image
 
 model_name: str = "Qwen/Qwen2.5-VL-3B-Instruct"
-image_base_path: str = "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train_full/png/png/"
+image_base_path: str = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train_full/png/png/"
 
 processor = AutoProcessor.from_pretrained(model_name)
 

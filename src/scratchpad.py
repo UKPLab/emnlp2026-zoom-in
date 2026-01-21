@@ -45,7 +45,7 @@ def delete_folders_with_checkpoint_10(base_path="."):
 
 if __name__ == "__main__":
     # You can specify a different base path here if needed
-    base_directory = "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs"  # Current directory
+    base_directory = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/runs"  # Current directory
 
     # Ask for confirmation before proceeding
     response = input(f"This will delete all first-level subfolders in '{os.path.abspath(base_directory)}' "

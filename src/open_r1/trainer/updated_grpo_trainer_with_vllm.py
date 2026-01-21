@@ -298,8 +298,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         multi_turn: str = None,
         chat_template: dict = None,
         save_path: str = None,
-        max_tool_uses: int = None,
-        strict_tool_extraction: bool = None,
+        tool_handling: dict = None,
         processor_init_kwargs: dict = None,
         tools: Union[Tool, list[Tool]] = None,
         use_global_buffer: bool = False,
@@ -322,8 +321,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         
         self.vlm_module = vlm_module
         self.save_path = save_path
-        self.max_tool_uses = max_tool_uses
-        self.strict_tool_extraction = strict_tool_extraction
+        self.tool_handling = tool_handling
         if tools == []:
             self.tools = None
         elif isinstance(tools, Tool):
@@ -459,10 +457,9 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                 )
         self.reward_funcs = reward_funcs
 
-        self.reward_funcs_per_completion = [rf["func"] for rf in self.reward_funcs if rf["type"]=="per_completion"]
-        #self.reward_funcs_per_completion_names = [rf["name"] for rf in self.reward_funcs if rf["type"] == "per_completion"]
-        self.reward_funcs_per_group =      [rf["func"] for rf in self.reward_funcs if rf["type"]=="per_group"]
-        #self.reward_funcs_per_group_names = [rf["name"] for rf in self.reward_funcs if rf["type"] == "per_group"]
+        self.reward_funcs_per_completion = [{"reward_func": rf["func"], "is_conditional": rf["is_conditional"]} for rf in self.reward_funcs if rf["type"]=="per_completion"]
+        self.reward_funcs_per_group =      [{"reward_func": rf["func"], "is_conditional": rf["is_conditional"]} for rf in self.reward_funcs if rf["type"]=="per_group"]
+
 
 
         # Reward processing class
@@ -916,6 +913,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         # only used in image and text rethink
         format_prompt = "As before, first output the thinking process in <think> </think> tags and then output the final answer in <answer> </answer> tags."
 
+        logger.info(f"input keys: {inputs[0].keys()}")
 
         device = self.accelerator.device
         rank = dist.get_rank() if dist.is_initialized() else 0
@@ -1056,15 +1054,13 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                         #conversations.is_finished = [True] * no_conversations
                         multi_turn_manager.is_finished = [True for _ in range(no_conversations)]
                 elif self.multi_turn == "tool":
-
-                    #if self.state.global_step > 382:
-                    #    self.strict_tool_extraction = True
                     
                     multi_turn_manager.handle_tool_call(save_path=os.path.join(self.save_path, "tool_calls"),
-                                                   step=self.state.global_step, strict_extraction=self.strict_tool_extraction)
+                                                   step=self.state.global_step, strict_extraction=self.tool_handling["strict_tool_extraction"],
+                                                        finish_after_wrong_tool_call=self.tool_handling["finish_after_wrong_tool_call"])
 
                     for idx in range(no_conversations):
-                        if self.max_tool_uses is not None and multi_turn_manager.get_no_tool_calls(idx) > self.max_tool_uses:
+                        if self.tool_handling["max_tool_uses"] is not None and multi_turn_manager.get_no_tool_calls(idx) > self.tool_handling["max_tool_uses"]:
                             multi_turn_manager.is_finished[idx] = True
                 else:
                     raise ValueError(f"Invalid value for multi_turn: {self.multi_turn}. Choose from None, 'text', 'image', or 'tool'")
@@ -1212,7 +1208,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         logger.info(f"for scoring: bs: {self.args.per_device_train_batch_size}")
         override_advantages = None
         t4 = time.time()
-        with (torch.no_grad()):
+        with ((torch.no_grad())):
             # When using num_iterations == 1, old_per_token_logps == per_token_logps, so we can skip its
             # computation here, and use per_token_logps.detach() instead.
             if self.num_iterations > 1:
@@ -1477,10 +1473,19 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                             assert contrasted_area_short[1] > contrasted_area_short[0]
 
                             if self.mi_mode["alternative_action"] == "alternative_tool_call":
-                                contrast_diff = (
-                                            full_forward_score[idx, contrasted_area[0] - 1: contrasted_area[1] - 1] -
-                                            vision_masked_per_token_score[
-                                                idx, contrasted_area_short[0] - 1: contrasted_area_short[1] - 1])
+                                if self.mi_mode["use_info_nce"]:
+                                    # safe way of writing ln(x/0.5(x+y))
+                                    contrast_diff = torch.logaddexp(full_forward_score[idx, contrasted_area[0] - 1: contrasted_area[1] - 1],
+                                                                    full_forward_score[idx, contrasted_area[0] - 1: contrasted_area[1] - 1]) - \
+                                                    torch.logaddexp(full_forward_score[idx, contrasted_area[0] - 1: contrasted_area[1] - 1],
+                                                                    vision_masked_per_token_score[idx, contrasted_area_short[0] - 1: contrasted_area_short[1] - 1])
+
+                                else:
+                                    contrast_diff = (
+                                                full_forward_score[idx, contrasted_area[0] - 1: contrasted_area[1] - 1] -
+                                                vision_masked_per_token_score[
+                                                    idx, contrasted_area_short[0] - 1: contrasted_area_short[1] - 1])
+
                             else:
 
                                 answer_scores_full = full_forward_score[idx,
@@ -1593,11 +1598,15 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         # Compute the rewards
         # No need to duplicate prompts as we're not generating multiple completions per prompt
 
+        bbox_estimate = multi_turn_manager.get_absolute_bboxes()
+
         overall_tools_used = torch.tensor(overall_tools_used, dtype=torch.float16, device=device)
         completion_rewards_per_func = torch.zeros(len(prompts), len(self.reward_funcs_per_completion), device=device)
-        for i, (reward_func, reward_processing_class) in enumerate(
+        for i, (reward_func_dict, reward_processing_class) in enumerate(
             zip(self.reward_funcs_per_completion, self.reward_processing_classes)
         ):
+            reward_func = reward_func_dict['reward_func']
+            is_conditional = reward_func_dict['is_conditional']
             if isinstance(reward_func, PreTrainedModel):
                 raise NotImplementedError("reward function can't be a model atm")
             else:
@@ -1608,19 +1617,22 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                         # No need to duplicate prompts as we're not generating multiple completions per prompt
                         # reward_kwargs[key].extend([example[key]] * self.num_generations)
                         reward_kwargs[key].extend([example[key]])
-
+                logger.info(f"reward_kwargs: {reward_kwargs}")
                 output_reward_func = reward_func(prompts=prompts, completions=completions,
                                                  tool_uses = overall_tools_used,
                                                  group_size = self.num_generations,
                                                  absolute_diff = diff,
                                                  contrasted_area = contrasted_area,
                                                  contrast_diff_list = contrast_diff_list,
+                                                 bbox_estimate = bbox_estimate,
                                                  **reward_kwargs)
                 if output_reward_func is None:
                     completion_rewards_per_func[:, i] = 0
                 else:
                     #logger.info(f"output_reward_func: {output_reward_func}")
                     completion_rewards_per_func[:, i] = torch.tensor(output_reward_func, dtype=torch.float32, device=device)
+                    if is_conditional:
+                        completion_rewards_per_func[:, i] = completion_rewards_per_func[:, i] * (completion_rewards_per_func[:, 0] > 0.5)
         logger.info(f"after per-instance rewards")
         # Gather rewards across processes
         completion_rewards_per_func = self.accelerator.gather(completion_rewards_per_func)
@@ -1628,12 +1640,15 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         # note that overall_tools_used is global, whereas prompts and completions are local, so group rewards should
         # not use prompts or completions directly
         group_rewards_per_func = torch.zeros(len(overall_tools_used), len(self.reward_funcs_per_group), device=device)
-        for i, reward_func in enumerate(self.reward_funcs_per_group):
+        for i, reward_func_dict in enumerate(self.reward_funcs_per_group):
+            reward_func = reward_func_dict['reward_func']
+            is_conditional = reward_func_dict['is_conditional']
             group_rewards_per_func[:, i] = reward_func(prompts=prompts, completions=completions,
                                                        tool_uses=overall_tools_used, group_size=self.num_generations,
-                                                       # assuming that the first reward is accuracy
-                                                       accuracy_reward=completion_rewards_per_func[:, 0],
                                                        **reward_kwargs)
+            if is_conditional:
+                # assuming that the first reward is accuracy
+                group_rewards_per_func[:, i] = group_rewards_per_func[:, i] * (completion_rewards_per_func[:, 0] > 0.5)
 
         rewards_per_func = torch.cat((completion_rewards_per_func, group_rewards_per_func), dim=1)
 

@@ -56,6 +56,11 @@ def get_results(path:str, metrics: list[str]):
             if metric == "zoom_in_fraction_median":
                 image_fractions = np.array([(sample[1][0] * sample[1][1])/(sample[0][0] * sample[0][1]) for idx, sample in enumerate(data["image_sizes"]) if len(sample) > 1])
                 result[metric] = np.median(image_fractions)
+            if metric == "ious":
+                distr = []
+                for i in range(len(data["ious"])):
+                    distr.append(np.mean(np.array(data["ious"][i])))
+                result[metric] = distr
             if metric == "avg_total_completion_len":
                 result[metric] = np.mean(np.array([sum(sample) for sample in data["completion_len"]]))
             if metric == "avg_first_completion_len":
@@ -88,6 +93,7 @@ def get_results(path:str, metrics: list[str]):
                                              accu_reward_method=accu_reward_method,
                                              **metric)
                 result[metric["metric_short_name"]] = np.mean(np.array(new_metric))
+
 
 
 

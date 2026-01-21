@@ -12,7 +12,7 @@ messages = [
         "content": [
             {
                 "type": "image",
-                "image": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train_full/png/png/two_col_22791.png",
+                "image": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train_full/png/png/two_col_22791.png",
             },
             {"type": "text", "text": "Describe this image."},
         ],
@@ -24,7 +24,7 @@ text = processor.apply_chat_template(
 )
 
 prompts = [{"prompt": text,
-            "image_path": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train_full/png/png/two_col_22791.png"
+            "image_path": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train_full/png/png/two_col_22791.png"
             }]
 
 

@@ -96,7 +96,22 @@ TOOL_CONFIGS = {
                 "tool_message_text_fillers": ["width", "height"],
                 "prompt_type": "pr_original"
 
+            },
+            "PR_crop_image_normalized_single": {
+                "tool_name": "crop_image_normalized",
+                "tool_template": "zoom_in",
+                "tool_json_customization": {"function,description": "Zoom in on the image based on the bounding box coordinates. It is useful when the object or text in the image is too small to be seen.",
+                                            "function,parameters,properties,bbox_2d,description": "coordinates for bounding box of the region you want to zoom in. Values should be within [0.0,1.0].",
+                                            "function,parameters,properties,bbox_2d,items,type": "number",
+                                            "function,parameters,properties,target_image,type": "number",
+                                            "function,name": "crop_image_normalized"},
+                "tool_message_image_pos": "last",
+                "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
+                "tool_message_text_fillers": ["width", "height"],
+                "prompt_type": "pr_adapted"
+
             }
+
 
         }
 
@@ -158,14 +173,17 @@ def zoom_in(image_path, bbox_2d, padding=(0.1,0.1), min_pixels=None, max_pixels=
     normalized_y1 =min(max(0, normalized_y1), 1)
     normalized_x2 =min(max(0, normalized_x2), 1)
     normalized_y2 =min(max(0, normalized_y2), 1)
-    cropped_img = image.crop((int(normalized_x1*img_x),
+
+    absolute_bbox_for_original_image = (int(normalized_x1*img_x),
                               int(normalized_y1*img_y),
                               int(normalized_x2*img_x),
-                              int(normalized_y2*img_y)))
+                              int(normalized_y2*img_y))
+
+    cropped_img = image.crop(absolute_bbox_for_original_image)
     w, h = cropped_img.size
     assert w > 28 and h > 28, f"Cropped image is too small: {w}x{h}"
 
-    return cropped_img
+    return cropped_img, absolute_bbox_for_original_image
 
 def select_frames():
     raise NotImplementedError
@@ -309,7 +327,7 @@ class Tool:
         actual_tool_args.pop("target_image")
 
         if not (1 <= int(tool_args['target_image']) <= len(tool_params['image_paths'])):
-            raise ValueError(f"target_image position out of bounds: {tool_args['target_image']}")
+            raise ValueError(f"target_image position out of bounds: {tool_args['target_image']}. It should be between 1 and {len(tool_params['image_paths'])}.")
 
         actual_tool_args["image_path"] = tool_params['image_paths'][int(tool_args['target_image']) - 1]
 
@@ -321,6 +339,7 @@ class Tool:
         original_tool_hparams = self.callable_function.keywords
 
         new_bbox = None
+        absolute_bbox_wrt_target_coords = None
         if generate_and_use_new_bbox is not None:
             new_bbox = generate_bbox_2d_new_close_iou_targeted(**original_tool_hparams,
                                                     **actual_tool_args,
@@ -341,7 +360,7 @@ class Tool:
             new_image = Image.new('RGB', (int(new_bbox[2] - new_bbox[0]),
                                                     int(new_bbox[3] - new_bbox[1])), color=color_rgb)
         else:
-            new_image = self.callable_function(**actual_tool_args)
+            new_image, absolute_bbox_wrt_target_coords = self.callable_function(**actual_tool_args)
 
         img_x, img_y = new_image.size
 
@@ -373,7 +392,9 @@ class Tool:
             "new_image_path": new_image_path,
             "new_image_id": new_image_id,
             "output_message": self.message.get_content(message_args),
-            "new_bbox": new_bbox
+            "new_bbox": new_bbox,
+            "absolute_bbox_wrt_target_coords": absolute_bbox_wrt_target_coords,
+            "target_image_idx": int(tool_args['target_image']) - 1,
         }
 
 def extract_tool(text:str, tool_start:str = TOOL_START, tool_end:str = TOOL_END, strict:bool = False, tool_start_position:str = "last"):

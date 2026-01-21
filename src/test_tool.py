@@ -129,10 +129,10 @@ TOOLS = [
     },
 ]
 
-# "file:///pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train_full/png/png/two_col_22791.png"
+# "file:///pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train_full/png/png/two_col_22791.png"
 
-img_path_1 = "file:///pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train_full/png/png/two_col_22791.png"
-img_path_2 = "file:///pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train_full/png/png/two_col_651.png"
+img_path_1 = "file:///pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train_full/png/png/two_col_22791.png"
+img_path_2 = "file:///pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train_full/png/png/two_col_651.png"
 
 
 MESSAGES = [
@@ -277,7 +277,7 @@ if __name__ == '__main__':
                 "content": [
                     {
                         "type": "image",
-                        "image": "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train_full/png/png/two_col_22791.png",
+                        "image": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train_full/png/png/two_col_22791.png",
                     },
                     {"type": "text", "text": prompt_text},
                 ],
@@ -292,7 +292,7 @@ if __name__ == '__main__':
         prompts.append({"prompt": text,
                 "multi_modal_data":
                     {"image": PIL.Image.open(
-                        "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train_full/png/png/two_col_22791.png")}})
+                        "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train_full/png/png/two_col_22791.png")}})
 
     output = llm.generate(prompts=prompts)
 

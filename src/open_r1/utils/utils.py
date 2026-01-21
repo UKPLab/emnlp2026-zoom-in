@@ -6,6 +6,7 @@ import random
 from dataclasses import dataclass
 
 import math
+import numpy as np
 
 from PIL import Image
 
@@ -28,14 +29,49 @@ def get_resized_image_scales(height:int, width:int, min_pixels:int=None, max_pix
 
     return resized_height, resized_width
 
-def basic_iou_target_fn(step, start:int, end:int, increase: str):
+def basic_iou_target_fn(step, start:int, end:int, increase: str, max_value: float = None):
+    if max_value is None:
+        max_value = 1.0
     if increase == "linear":
         div = 1 if end == start else end - start
         if step < start:
             return 0
         if step > end:
             return 1
-        return float(step - start) / float(div)
+        return max_value * float(step - start) / float(div)
+
+
+def calculate_iou(box1, box2):
+    """
+    Calculate IoU of two bounding boxes [x1, y1, x2, y2].
+    Uses NumPy for a fast, "out-of-the-box" vectorizable approach.
+    """
+    box1 = np.array(box1)
+    box2 = np.array(box2)
+
+    # Determine the coordinates of the intersection rectangle
+    x_left = max(box1[0], box2[0])
+    y_top = max(box1[1], box2[1])
+    x_right = min(box1[2], box2[2])
+    y_bottom = min(box1[3], box2[3])
+
+    if x_right < x_left or y_bottom < y_top:
+        return 0.0
+
+    # The intersection of two axis-aligned bounding boxes is always an
+    # axis-aligned bounding box
+    intersection_area = (x_right - x_left) * (y_bottom - y_top)
+
+    # Compute the area of both bounding boxes
+    box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
+    box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
+
+    # Compute the intersection over union by taking the intersection
+    # area and dividing it by the sum of prediction + ground-truth
+    # areas - the intersection area
+    iou = intersection_area / float(box1_area + box2_area - intersection_area)
+    return iou
+
 
 
 BBoxIn = Tuple[float, float, float, float]

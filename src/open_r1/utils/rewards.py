@@ -7,6 +7,9 @@ import os
 import torch
 from datetime import datetime
 
+from .utils import calculate_iou
+
+
 def extract_choice(text):
     # 1. Clean and normalize text
     text = text.upper()  # Convert to uppercase
@@ -322,18 +325,38 @@ def curiosity_reward(tool_uses, group_size, pixel_reasoning_threshold, **kwargs)
 def pr_penalty_reward(tool_uses, tool_use_penalty_threshold, **kwargs):
     return torch.clamp(tool_use_penalty_threshold - tool_uses, max=0)
 
-def pr_penalty_if_correct_reward(tool_uses, tool_use_penalty_threshold, accuracy_reward, **kwargs):
-    return pr_penalty_reward(tool_uses, tool_use_penalty_threshold, **kwargs) * (accuracy_reward > 0.5)
-
 def constant_exploration(tool_uses, **kwargs):
     return (tool_uses > 0).float()
+
+def iou_reward(bbox_estimate:list[list[tuple[int, int, int, int]]], bbox:list[tuple[int, int, int, int]],
+               aggregate_over_conv: str, **kwargs):
+    rewards = []
+    for conv_idx in range(len(bbox_estimate)):
+        if len(bbox_estimate[conv_idx]) == 0:
+            rewards.append(0.0)
+            continue
+        conv_ious = []
+        for turn_idx in range(len(bbox_estimate[conv_idx])):
+            conv_ious.append(calculate_iou(bbox_estimate[conv_idx][turn_idx], bbox[conv_idx]))
+
+        if aggregate_over_conv == "first":
+            rewards.append(conv_ious[0])
+            continue
+        elif aggregate_over_conv == "last":
+            rewards.append(conv_ious[-1])
+            continue
+        elif aggregate_over_conv == "mean":
+            rewards.append(np.mean(np.array(conv_ious)))
+            continue
+        else:
+            raise ValueError(f"Invalid aggregate_over_conv: {aggregate_over_conv}")
+
+    return rewards
 
 def mutual_information_reward(absolute_diff:torch.Tensor, contrasted_area: torch.Tensor, contrast_diff_list: list[torch.Tensor],
                               delta:float, gamma: float,
                               alpha:float, length_factor_scaling:int, tau:float, discretize:bool, q:float,
                               ignored_prefix_len: int, tanh: bool, length_factor: float, **kwargs):
-
-
 
     if ignored_prefix_len is None:
         ignored_prefix_len = 0

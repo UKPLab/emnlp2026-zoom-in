@@ -76,9 +76,9 @@ def get_boundaries_tokenized(content: torch.tensor, left_boundary_tokens:torch.t
 if __name__ == "__main__":
     processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")
 
-    image_paths = ["/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train/png/multi_col_1000.png",
-                   #"/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train/png/multi_col_1000.png",
-                   "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train/png/multi_col_1000.png"]
+    image_paths = ["/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train/png/multi_col_1000.png",
+                   #"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train/png/multi_col_1000.png",
+                   "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train/png/multi_col_1000.png"]
 
     image = [[PIL.Image.open(image_path) for image_path in image_paths] for _ in range(2)]
 

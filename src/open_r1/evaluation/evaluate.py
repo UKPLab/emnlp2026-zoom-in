@@ -10,6 +10,8 @@ import numpy as np
 import PIL
 from open_r1.utils.rewards import accuracy_reward
 from trl.data_utils import is_conversational
+
+from open_r1.utils.utils import calculate_iou
 from open_r1.vlm_modules import Qwen2VLModule
 from transformers import AutoProcessor
 from vllm import LLM, SamplingParams
@@ -19,6 +21,7 @@ import time
 import json
 from open_r1.utils.prompts import get_question_template
 import gc
+import sys
 
 from open_r1.utils.multi_turn_manager import MultiTurn, pad
 
@@ -168,8 +171,13 @@ class Evaluator:
         # _tool_fixed_crop
         #self.eval_path = os.path.join(self.save_path, f"dataset_{dataset['dataset_name']}_prompt_{prompt_type}")
 
-        hf_dataset = self.preprocess_dataset(dataset, prompt_type, tools).select_columns(["prompt", "image_path",
-                                                                                   "solution", "accu_reward_method"])
+        hf_dataset = self.preprocess_dataset(dataset, prompt_type, tools)
+
+        target_columns = ["prompt", "image_path", "solution", "accu_reward_method", "bbox"]
+        available_columns =[col for col in target_columns if col in hf_dataset.column_names]
+
+        hf_dataset = hf_dataset.select_columns(available_columns)
+
         if batch_size is None:
             batch_size = len(hf_dataset)
         dataloader = DataLoader(
@@ -194,14 +202,17 @@ class Evaluator:
         json.dump(self.metrics, open(os.path.join(self.save_path, "full_results.json"), "w"))
 
     def preprocess_dataset(self, dataset, prompt_type, tools):
-        if dataset["dataset_name"] in ["pixel_reasoner", 'pixel_reasoner_vstar', 'pixel_reasoner_infovqa']:
+        if dataset["dataset_name"] in ["pixel_reasoner", 'pixel_reasoner_vstar', 'pixel_reasoner_infovqa',
+                                       "hr_bench_4k", "hr_bench_8k", "mme", "mme_lite"] or dataset["dataset_name"].startswith("muffin_chihuahua"):
             #logger.info(f"prompt type: {prompt_type}")
             #logger.info(f"tool name: {tool_name}")
             logger.info(f"in preprocess_dataset, tools={tools}")
             question_prompt = get_question_template(task_type=prompt_type)
             if tools is not None:
                 if len(tools) == 1:
-                    question_prompt = question_prompt.replace("{tool_name}", tools[0].name)
+                    tool = tools[0]
+                    tool_name = "crop_image" if tool.name == "crop_image_normalized" else tool.name
+                    question_prompt = question_prompt.replace("{tool_name}", tool_name)
                 else:
                     for idx, tool in enumerate(tools):
                         replacement_string = f"tool_name{idx+1}"
@@ -347,11 +358,40 @@ class Evaluator:
             conv_round += 1
             logger.info(f"all_multimodal_token_inputs for conv_round {conv_round}: {all_multimodal_token_inputs}")
 
-
+        logger.info(f"after multi-turn generation")
         overall_tools_used = [multi_turn_manager.get_no_tool_calls(idx) for idx in range(no_conversations)]
 
         attempted_tool_uses = [multi_turn_manager.get_no_tool_calls(idx, type="attempt") for idx in
                                range(no_conversations)]
+
+        if "bbox" in inputs[0].keys():
+            bboxes = multi_turn_manager.get_absolute_bboxes(flatten=False)
+            logger.info(f"bboxes: {bboxes}")
+
+            gold_bboxes = [x['bbox'] for x in inputs]
+            logger.info(f"gold_bboxes: {gold_bboxes}")
+    
+            ious = []
+            for idx in range(len(gold_bboxes)):
+                if gold_bboxes[idx] is None:
+                    logger.info(f"gold_bbox is None for sample {idx}, skipping")
+                    continue
+                for tool_use_idx in range(len(bboxes[idx])):
+                    iou = calculate_iou(gold_bboxes[idx], bboxes[idx][tool_use_idx])
+                    if len(ious) < tool_use_idx + 1:
+                        ious.append([iou])
+                    else:
+                        ious[tool_use_idx].append(iou)
+
+            logger.info(f"after iou calculation: ious: {ious}")
+
+            for tool_use_idx in range(len(ious)):
+                if len(self.metrics["ious"]) < tool_use_idx + 1:
+                    self.metrics["ious"].append(ious[tool_use_idx])
+                else:
+                    self.metrics["ious"][tool_use_idx] += ious[tool_use_idx]
+        else:
+            logger.info(f"Skipping iou calculation for samples where bboxes are not given")
 
         self.metrics["tool_use"] += overall_tools_used
         self.metrics["attempted_tool_use"] += attempted_tool_uses
@@ -452,7 +492,7 @@ def evaluation_process(model_path, model_class, output_path:str, tensor_parallel
         save_path=output_path,
         vllm_client=llm_engine,
         metrics=["accuracy", "tool_use", "attempted_tool_use", "query", "solution",
-                 "model_answer", "model_answer_tokenized", "images", "image_sizes", "completion_len"]
+                 "model_answer", "model_answer_tokenized", "images", "image_sizes", "completion_len", "ious"]
     )
     
     t0 = time.time()

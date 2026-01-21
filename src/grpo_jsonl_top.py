@@ -26,7 +26,7 @@ import determined as det
 from open_r1.utils.logger import setup_project_logging
 from open_r1.utils.tools import Tool, Message, TOOL_CONFIGS
 from open_r1.utils.rewards import curiosity_reward, pr_penalty_reward, format_reward, accuracy_reward, \
-    format_reward_only_answer, mutual_information_reward, constant_exploration, pr_penalty_if_correct_reward
+    format_reward_only_answer, mutual_information_reward, constant_exploration, iou_reward
 from open_r1.utils.utils import basic_iou_target_fn
 from open_r1.trainer import UpdatedVLMGRPOTrainerVLLM
 from open_r1.preprocess_data import prepare_data
@@ -66,6 +66,10 @@ class GRPOScriptArguments(ScriptArguments):
     reward_func_weights: list[float] = field(
         default_factory=lambda: [1.0],
         metadata={"help": "Weights for reward functions. Must have the same length as reward_funcs"},
+    )
+    reward_func_conditionals: list[bool] = field(
+        default=None,
+        metadata={"help": "whether this reward function should be conditioned on accuracy reward"},
     )
     reward_func_usage: list[str] = field(
         default=None,
@@ -137,6 +141,12 @@ class GRPOScriptArguments(ScriptArguments):
         metadata={
             "help": "whether to use strict tool extraction. this means we only allow a single tool_start, "
                     "a single tool_end and tool_end must be at the end of the generated seq"
+        }
+    )
+    finish_after_wrong_tool_call: Optional[bool] = field(
+        default=True,
+        metadata={
+            "help": "whether to stop the generation after a wrong tool call or give the model the chance to correct itself"
         }
     )
     tool_config: Optional[str] = field(
@@ -273,12 +283,27 @@ class GRPOScriptArguments(ScriptArguments):
         }
     )
 
+    mi_use_info_nce: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "whether to use log((full + full) / (full + short)) instead of log(full/short)"
+        }
+    )
+
     #mi_short_bridge: Optional[str] = field(
     #    default=None,
     #    metadata={
     #        "help": "what to insert after the removed area and before the contrasted area. Choose from 'double_newline', 'double_newline,the,answer,is' or None"
     #    }
     #)
+
+    iou_reward_aggregate: Optional[str] = field(
+        default="last",
+        metadata={
+            "help": "how to aggregate the iou scores per conversation. Only makes a difference for multiple successful tool uses."
+                    " choose from 'first', 'last', 'mean'."
+        }
+    )
 
     training_mode: Optional[str] = field(
         default=None,
@@ -378,10 +403,12 @@ class GRPOScriptArguments(ScriptArguments):
         }
     )
 
-
-
-
-
+    iou_target_max_value: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "maximum value of iou_target, default is 1.0. after iou_target_one it will jump to 1"
+        }
+    )
 
 @dataclass
 class GRPOModelConfig(ModelConfig):
@@ -452,10 +479,6 @@ def main(script_args, training_args, model_args):
                                        tool_use_penalty_threshold=script_args.tool_use_penalty_threshold),
                        "type": "per_group",
                        "name": "pr_penalty"},
-        "pr_penalty_if_correct": {"func": partial(pr_penalty_if_correct_reward,
-                                       tool_use_penalty_threshold=script_args.tool_use_penalty_threshold),
-                       "type": "per_group",
-                       "name": "pr_penalty_if_correct"},
         "mutual_information": {"func": partial(mutual_information_reward,
                                                gamma=script_args.mutual_information_clip_value,
                                                delta=script_args.mutual_information_threshold,
@@ -471,7 +494,8 @@ def main(script_args, training_args, model_args):
                                "name": "mutual_information"},
         "constant_exploration": {"func": constant_exploration,
                                  "type": "per_group",
-                                 "name":"constant_exploration"}
+                                 "name":"constant_exploration"},
+        "iou": {"func": partial(iou_reward, aggregate_over_conv=script_args.iou_reward_aggregate), "type": "per_completion", "name": "iou"}
     }
 
     # todo: refactor this to allow for variable dataset size
@@ -479,7 +503,8 @@ def main(script_args, training_args, model_args):
         iou_target_fn = None
     else:
         iou_target_fn = partial(basic_iou_target_fn, start=int(script_args.iou_target_zero * 1146),
-                            end=int(script_args.iou_target_one * 1146), increase = script_args.iou_target_increase)
+                            end=int(script_args.iou_target_one * 1146), increase = script_args.iou_target_increase,
+                                max_value=script_args.iou_target_max_value)
 
     # Load the VLM module
     vlm_module_cls = get_vlm_module(model_args.model_name_or_path)
@@ -522,7 +547,14 @@ def main(script_args, training_args, model_args):
     #if script_args.prompt_type == "no_think":
     #    reward_funcs.append("no_think")
     # Get reward functions
-    reward_funcs = [reward_funcs_registry[func] for func in script_args.reward_funcs]
+    reward_funcs = []
+    for idx, func in enumerate(script_args.reward_funcs):
+        rf = reward_funcs_registry[func]
+        if script_args.reward_func_conditionals is not None:
+            rf["is_conditional"] = script_args.reward_func_conditionals[idx]
+        else:
+            rf["is_conditional"] = False
+        reward_funcs.append(rf)
     assert len(reward_funcs) == len(script_args.reward_func_weights), f"the number of reward functions {reward_funcs} must be equal to the number of reward function weights {script_args.reward_func_weights}"
     logger.info(f"!!! reward_funcs !!!:\n {reward_funcs} \n!!! reward_funcs !!!")
     if script_args.reward_func_usage is None:
@@ -590,8 +622,16 @@ def main(script_args, training_args, model_args):
                "answer_type": script_args.mi_answer_type,
                "use_advantages_directly": script_args.mi_use_advantages_directly,
                "custom_advantage_position": script_args.mi_custom_advantage_position,
-               "importance_sampling": script_args.mi_importance_sampling,}
+               "importance_sampling": script_args.mi_importance_sampling,
+               "use_info_nce": script_args.mi_use_info_nce
+    }
 
+
+    tool_handling = {
+        "max_tool_uses": script_args.max_tool_uses,
+        "strict_tool_extraction": script_args.strict_tool_extraction,
+        "finish_after_wrong_tool_call": script_args.finish_after_wrong_tool_call
+    }
 
 
     if script_args.eps_tool_use_rate_threshold is not None or script_args.eps_exploration_threshold is not None:
@@ -621,10 +661,9 @@ def main(script_args, training_args, model_args):
             multi_turn=script_args.multi_turn,
             chat_template=chat_template,
             save_path=training_args.output_dir,
-            max_tool_uses=script_args.max_tool_uses,
             processor_init_kwargs = processor_init_kwargs,
             tools = tools,
-            strict_tool_extraction=script_args.strict_tool_extraction,
+            tool_handling = tool_handling,
             use_global_buffer = script_args.global_buffer,
             vllm_address = vllm_address,
             mi_masked_vision_forward_model = script_args.mi_masked_vision_forward_model,

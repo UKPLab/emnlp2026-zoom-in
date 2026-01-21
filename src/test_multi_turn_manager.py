@@ -36,7 +36,7 @@ if __name__ == "__main__":
                          {'type': 'text', 'text': "Hello World \\boxed{A}"}
                      ]
                      }
-    default_image = "/pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/pixel_reasoner/RL_data_without_video/images/a15ab079-1311-444c-8d50-1ba3544b6e06-0.jpg"
+    default_image = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/pixel_reasoner/RL_data_without_video/images/a15ab079-1311-444c-8d50-1ba3544b6e06-0.jpg"
 
     processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")
 
@@ -74,8 +74,15 @@ if __name__ == "__main__":
 
     mt.add_model_reply(assistant_tool_tokenized["input_ids"], mapping=[1])
 
-    mt.add_user_message(prompts = [user_simple_2], image_paths=[default_image], mapping=[1])
+    mt.add_user_message(prompts = [user_simple_2], image_paths=[default_image], mapping=[1],
+                        absolute_bbox_wrt_target_coordss=[(100, 100, 200, 200)], target_image_idxs=[0])
+    print(f"overview after add_user_message: {mt.all_multi_turn}")
+    mt.add_model_reply(assistant_tool_tokenized["input_ids"], mapping=[1])
 
+    mt.add_user_message(prompts=[user_simple_2], image_paths=[default_image], mapping=[1],
+                        absolute_bbox_wrt_target_coordss=[(10, 10, 50, 50)], target_image_idxs=[1])
+    print(f"overview after add_user_message: {mt.all_multi_turn}")
+    sys.exit()
     assistant_box_tokenized = processor(text=[assistant_box["content"][0]["text"]],
                                          images=None,
                                          return_tensors=None,

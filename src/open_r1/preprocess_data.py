@@ -1,5 +1,7 @@
 import os
 import json
+import sys
+
 from datasets import Dataset
 from functools import partial
 from open_r1.utils.logger import get_logger
@@ -88,6 +90,72 @@ def make_hf_dataset(dataset_names, data_folders, image_folders, reward_method=No
                     answers = ast.literal_eval(answer)
 
                     answers = [answer[7:-1] for answer in answers]
+
+                    item["solution"] = answers
+                    del item["image"]
+                    item["accu_reward_method"] = accu_reward_method
+
+                    all_data.append(item)
+
+        elif dataset_name in ["hr_bench_4k", "hr_bench_8k"]:
+            with open(data_file, 'r') as f:
+                for line in f:
+                    item = json.loads(line)
+                    problem = item.pop('question')
+
+
+                    item['problem'] = (f"{problem}\n(A) {item.pop('A')}"
+                                                f"\n(B) {item.pop('B')}"
+                                                f"\n(C) {item.pop('C')}"
+                                                f"\n(D) {item.pop('D')}"
+                                       f"\nAnswer with the option's letter from the given choices directly.")
+
+
+                    item["image_path"] = [os.path.join(image_folder, item["image"])]
+                    assert len(item["image_path"]) == 1, f"Only one image is expected, but got {item['image_path']}"
+                    answers = [item.pop('answer')]
+
+                    print(answers)
+
+                    item["solution"] = answers
+                    del item["image"]
+                    item["accu_reward_method"] = accu_reward_method
+
+                    all_data.append(item)
+        elif dataset_name in ["mme", "mme_lite"]:
+            with open(data_file, 'r') as f:
+                for line in f:
+                    item = json.loads(line)
+                    problem = item.pop('question')
+
+                    item['problem'] = (f"{problem}\n"
+                                       f"{"\n".join(item.pop('multi-choice options'))}"
+                                       f"\nAnswer with the option's letter from the given choices directly.")
+
+                    item["image_path"] = [os.path.join(image_folder, item["image"])]
+                    assert len(item["image_path"]) == 1, f"Only one image is expected, but got {item['image_path']}"
+                    answers = [item.pop('answer')]
+                    print(answers)
+
+                    item["solution"] = answers
+                    del item["image"]
+                    item["accu_reward_method"] = accu_reward_method
+
+                    all_data.append(item)
+
+        elif dataset_name.startswith("muffin_chihuahua"):
+            with open(data_file, 'r') as f:
+                for line in f:
+                    item = json.loads(line)
+
+                    problem = item.pop('question')
+                    item['problem'] = (f"In the image you see a grid, whose cells are numbered from left to right and top to bottom. "
+                                       f"In each cell, the cell's index is printed in the upper left corner. {problem}")
+
+                    item["image_path"] = [os.path.join(image_folder, item["image"])]
+                    assert len(item["image_path"]) == 1, f"Only one image is expected, but got {item['image_path']}"
+                    answers = [item.pop('answer')]
+                    print(answers)
 
                     item["solution"] = answers
                     del item["image"]
@@ -186,6 +254,7 @@ def make_conversation_from_jsonl(example, question_prompt):
             'problem': example['problem'],
             #'solution': f"<answer> {example['solution']} </answer>",
             'solution': [f"\\boxed{{{sol}}}" for sol in example['solution']],
+            'bbox': example['bbox'] if 'bbox' in example else None,
             'accu_reward_method': example['accu_reward_method'],
             'prompt': [{
                 'role': 'user',
@@ -216,5 +285,5 @@ def prepare_data(dataset_names, data_folders, image_folders, question_prompt, re
     dataset = hf_dataset.map(make_conv_with_prompt, num_proc=8)
     logger.info(f"dataset: {dataset}")
     logger.info(f"dataset: {dataset[0]}")
-    logger.info(f"dataset: {dataset[100]}")
+    logger.info(f"dataset: {dataset[9]}")
     return dataset

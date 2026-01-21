@@ -2,12 +2,12 @@ run_name=$(basename "$0" .sh)
 
 RUN_ARGS=(
     --run_name ${run_name}
-    --output_dir /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs/${run_name}_$(date +%Y%m%d_%H%M%S)
+    --output_dir /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/runs/${run_name}_$(date +%Y%m%d_%H%M%S)
     --model_name_or_path Qwen/Qwen2.5-VL-7B-Instruct
-    --deepspeed /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/scripts/zero3.json
+    --deepspeed /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/scripts/zero3.json
     --dataset_name pixel_reasoner
-    --data_file_paths /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/pixel_reasoner/RL_data_without_video/train.jsonl
-    --image_folders /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/pixel_reasoner/RL_data_without_video
+    --data_file_paths /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/pixel_reasoner/RL_data_without_video/train.jsonl
+    --image_folders /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/pixel_reasoner/RL_data_without_video
     --max_completion_length 256
     --ds3_gather_for_generation True
     --use_vllm True
@@ -30,7 +30,7 @@ RUN_ARGS=(
     --multi_turn tool
     --reward_funcs accuracy constant_exploration
     --reward_func_weights 1 0.1
-    --chat_template /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/qwen_chat_template_tool.json
+    --chat_template /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/qwen_chat_template_tool.json
     --per_device_eval_batch_size 4
     --learning_rate 1e-6
     --lr_scheduler_type cosine

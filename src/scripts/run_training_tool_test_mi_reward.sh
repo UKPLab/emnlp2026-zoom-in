@@ -4,12 +4,12 @@ torchrun --nproc_per_node="1" \
     --nnodes="1" \
     ../grpo_jsonl_top.py \
     --run_name ${run_name} \
-    --output_dir /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/runs/${run_name}_$(date +%Y%m%d_%H%M%S) \
+    --output_dir /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/runs/${run_name}_$(date +%Y%m%d_%H%M%S) \
     --model_name_or_path Qwen/Qwen2.5-VL-3B-Instruct \
-    --deepspeed /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/scripts/zero3_for_testing.json \
+    --deepspeed /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/scripts/zero3_for_testing.json \
     --dataset_name chartqa \
-    --data_file_paths /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train_full/train_augmented_GRPO_format.jsonl \
-    --image_folders /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/datasets/focusreason/chartqa_original/train_full/png \
+    --data_file_paths /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train_full/train_augmented_GRPO_format.jsonl \
+    --image_folders /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/chartqa_original/train_full/png \
     --max_completion_length 256 \
     --max_prompt_length 1024 \
     --ds3_gather_for_generation True \
@@ -34,7 +34,7 @@ torchrun --nproc_per_node="1" \
     --reward_funcs accuracy mutual_information \
     --reward_func_weights 1 0.06 \
     --mutual_information_clip_value 1.5 \
-    --chat_template /pfss/mlde/workspaces/mlde_wsp_KIServiceCenter/helm/focusreason/src/qwen_chat_template_tool.json \
+    --chat_template /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/qwen_chat_template_tool.json \
     --learning_rate 1e-6 \
     --lr_scheduler_type cosine \
     --warmup_ratio 0.2 \
