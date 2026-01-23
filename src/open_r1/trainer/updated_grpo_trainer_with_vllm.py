@@ -1444,10 +1444,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                         override_advantages = torch.zeros((full_forward_score.shape[0], 3),
                                                           dtype=torch.bfloat16, device=device)
 
-
-
-
-                    contrasted_area = positions
+                    #contrasted_area = positions
                     # diff = full_forward_score - vision_masked_per_token_score
 
                     for idx in range(full_forward_score.shape[0]):
@@ -1472,42 +1469,30 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                             assert contrasted_area_short[0] > 0
                             assert contrasted_area_short[1] > contrasted_area_short[0]
 
+                            # get rid of .exp for probs, except at the very end
+
                             if self.mi_mode["alternative_action"] == "alternative_tool_call":
-                                if self.mi_mode["use_info_nce"]:
-                                    # safe way of writing ln(x/0.5(x+y))
-                                    contrast_diff = torch.logaddexp(full_forward_score[idx, contrasted_area[0] - 1: contrasted_area[1] - 1],
-                                                                    full_forward_score[idx, contrasted_area[0] - 1: contrasted_area[1] - 1]) - \
-                                                    torch.logaddexp(full_forward_score[idx, contrasted_area[0] - 1: contrasted_area[1] - 1],
-                                                                    vision_masked_per_token_score[idx, contrasted_area_short[0] - 1: contrasted_area_short[1] - 1])
-
-                                else:
-                                    contrast_diff = (
-                                                full_forward_score[idx, contrasted_area[0] - 1: contrasted_area[1] - 1] -
-                                                vision_masked_per_token_score[
-                                                    idx, contrasted_area_short[0] - 1: contrasted_area_short[1] - 1])
-
+                                original_score = full_forward_score[idx, contrasted_area[0] - 1: contrasted_area[1] - 1]
+                                alternative_score = vision_masked_per_token_score[idx, contrasted_area_short[0] - 1: contrasted_area_short[1] - 1]
                             else:
-
-                                answer_scores_full = full_forward_score[idx,
-                                                                        contrasted_area[0] - 1:
-                                                                        contrasted_area[1] - 1]
+                                answer_scores_full = full_forward_score[idx,contrasted_area[0] - 1:contrasted_area[1] - 1]
 
                                 logger.info(f"answer_scores_full before multiplication: {answer_scores_full}")
 
                                 answer_scores_short = vision_masked_per_token_score[idx,
-                                                                                    contrasted_area_short[0] - 1:
-                                                                                    contrasted_area_short[1] - 1]
+                                contrasted_area_short[0] - 1:
+                                contrasted_area_short[1] - 1]
 
                                 logger.info(f"answer_scores_short before multiplication: {answer_scores_short}")
 
-                                if self.mi_mode["contrasted_score"] == "probs":
-                                    answer_scores_full = torch.prod(answer_scores_full, dim = 0, keepdim=True)
-                                    answer_scores_short = torch.prod(answer_scores_short, dim = 0, keepdim=True)
-
+                                if contrasted_area[1] - contrasted_area[0]  !=  contrasted_area_short[1] - contrasted_area_short[0]:
+                                    answer_scores_full = torch.sum(answer_scores_full, dim=0, keepdim=True)
+                                    answer_scores_short = torch.sum(answer_scores_short, dim=0, keepdim=True)
 
                                 if not self.mi_mode["alternative_action"] == "alternative_tool_call":
                                     alternative_action_position = considered_seqs[idx]["alternative_action_position"]
-                                    alternative_action_position_short = considered_seqs[idx]["alternative_action_position_short"]
+                                    alternative_action_position_short = considered_seqs[idx][
+                                        "alternative_action_position_short"]
 
                                 if self.mi_mode["importance_sampling"] == True:
                                     logger.info(
@@ -1516,17 +1501,21 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                                         f"alternative_action_position_short in context: {inputs_mi["input_ids"][idx][alternative_action_position_short[0] - 3:alternative_action_position_short[1] + 3]}")
 
                                     if self.mi_mode["alternative_action"] == "second_model_generation":
-                                        alt_action_scores_full = full_forward_score[idx,alternative_action_position[0]-1:
-                                                                                    alternative_action_position[1]-1]
-                                        logger.info(f"alt_action_scores_full before multiplication: {alt_action_scores_full}")
+                                        alt_action_scores_full = full_forward_score[
+                                            idx, alternative_action_position[0] - 1:
+                                                 alternative_action_position[1] - 1]
+                                        logger.info(
+                                            f"alt_action_scores_full before multiplication: {alt_action_scores_full}")
                                         alt_action_scores_full = torch.prod(alt_action_scores_full)
                                     else:
                                         alt_action_scores_full = 1
 
-                                    alt_action_scores_short = vision_masked_per_token_score[idx, alternative_action_position_short[0] - 1:
-                                                                                                 alternative_action_position_short[1] - 1]
+                                    alt_action_scores_short = vision_masked_per_token_score[
+                                        idx, alternative_action_position_short[0] - 1:
+                                             alternative_action_position_short[1] - 1]
 
-                                    logger.info(f"alt_action_scores_short before multiplication: {alt_action_scores_short}")
+                                    logger.info(
+                                        f"alt_action_scores_short before multiplication: {alt_action_scores_short}")
                                     alt_action_scores_short = torch.prod(alt_action_scores_short)
                                     logger.info(f"alt_action_scores_short: {alt_action_scores_short}")
                                     logger.info(f"alt_action_scores_full: {alt_action_scores_full}")
@@ -1538,6 +1527,16 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                                 logger.info(f"answer_scores_short: {answer_scores_short}")
                                 logger.info(f"importance_sampling_ratio: {importance_sampling_ratio}")
 
+                                if self.mi_mode["alternative_action"] == "alternative_tool_call_without_execution":
+                                    original_score = answer_scores_full
+                                    alternative_score = answer_scores_short
+
+                            if self.mi_mode["use_info_nce"]:
+                                # safe way of writing ln(x/0.5(x+y))
+                                contrast_diff = torch.logaddexp(original_score,original_score) - \
+                                                torch.logaddexp(original_score,alternative_score)
+                            else:
+                                contrast_diff = original_score - alternative_score
 
                             contrast_diff_list.append(contrast_diff.detach())
 

@@ -702,15 +702,17 @@ class MultiTurn:
         answer: "ground_truth", "entropy", "full_generation"
         ground_truth: tokenized ground truth solution. Is only used if answer is "ground_truth"
         """
-
-        tokenized_ground_truth = self.processor(
-            text=ground_truth,
-            images=None,
-            return_tensors=None,
-            padding=False,
-            add_special_tokens=False,
-            return_offsets_mapping=False
-        )["input_ids"]
+        if answer == "ground_truth":
+            tokenized_ground_truth = self.processor(
+                text=ground_truth,
+                images=None,
+                return_tensors=None,
+                padding=False,
+                add_special_tokens=False,
+                return_offsets_mapping=False
+            )["input_ids"]
+        else:
+            tokenized_ground_truth = None
 
         alternative_mt_manager = copy.deepcopy(self)
         considered_seqs = {}
@@ -721,10 +723,11 @@ class MultiTurn:
             logger.info(f"before get alternative sequence for {idx}")
             validity = self.get_alternative_sequence(alternative_mt_manager=alternative_mt_manager, idx=idx, #copy.deepcopy(conv),
                                                      alternative_action=alternative_action, answer=answer,
-                                                     ground_truth= tokenized_ground_truth[idx], image_paths = copy.deepcopy(image_path),
+                                                     ground_truth= tokenized_ground_truth[idx] if tokenized_ground_truth is not None else None,
+                                                     image_paths = copy.deepcopy(image_path),
                                                      step = step, iou_target = iou_target, save_path = save_path,
                                                      )
-            logger.info(f"after get alternative sequence for {idx}")
+            logger.info(f"after get alternative sequence for {idx}. Validity: {validity}")
 
             if alternative_action == "alternative_tool_call":
                 if validity is not None:
@@ -733,18 +736,22 @@ class MultiTurn:
                 if validity is not None:
                     considered_seqs[idx] = validity
                 else:
+                    if alternative_action == "alternative_tool_call_without_execution":
+                        dummy_conv = conv[:3]
+                    else:
+                        dummy_conv = conv
                     considered_seqs[idx] = {"answer_position": [0,1],
                                             "answer_position_short": [0,1],
                                             "alternative_action_position": [0,1],
                                             "alternative_action_position_short": [0,1],
 
-                                            "short_sequence": get_sequence(conv, type="id",
+                                            "short_sequence": get_sequence(dummy_conv, type="id",
                                                                            add_assistant_start=False,
                                                                            full_image_pad=True),
-                                            "updated_original_sequence": get_sequence(conv, type="id",
+                                            "updated_original_sequence": get_sequence(dummy_conv, type="id",
                                                                            add_assistant_start=False,
                                                                            full_image_pad=True),
-                                            "image_turns": range(len(conv)),
+                                            "image_turns": range(len(dummy_conv)),
                                             "dummy": True}
 
         if alternative_action == "alternative_tool_call":
@@ -797,37 +804,42 @@ class MultiTurn:
 
         """
 
-        state = "before_tool_use"
-        original_action = "tool_call"
-
         conv = alternative_mt_manager.all_multi_turn[idx]
 
-        # exactly one successful tool call
+
         if len(conv) != 5:
+            logger.info(f"no alternative seq possible: not exactly one successful tool call (i.e. 5 turns), but {len(conv)} turns")
             return None
-        # model response was not empty
+
         if len(conv[2].token_ids) == 0:
+            logger.info(f"no alternative seq possible: model response was empty")
             return None
 
         # searching from behind to get the last tool call
         tool_start_idx = rindex_any(conv[2].token_ids, SPECIAL_TOKENS["tool_start"]["id"])
 
+
         original_tool_call = conv[2].token_ids[tool_start_idx:]
 
-        # second model response not empty
+
         if len(conv[4].token_ids) == 0:
+            logger.info(f"no alternative seq possible: second model response was empty")
             return None
+
 
         box_idx = rindex_any(conv[4].token_ids,
                              [SPECIAL_TOKENS["box"]["id"],
                               SPECIAL_TOKENS["open_curly_bracket"]["id"]])
 
-        if box_idx is None:
-            return None
+        if alternative_action in ["second_model_generation", "double_newline", "double_newline,the,answer,is"]:
+            if box_idx is None:
+                logger.info(f"no alternative seq possible: box start token not found in second model response")
+                return None
 
-        # check if there is at least one token after the box start
-        if box_idx + 2 >= len(conv[4].token_ids):
-            return None
+            # check if there is at least one token after the box start
+            if box_idx + 2 >= len(conv[4].token_ids):
+                logger.info(f"no alternative seq possible: box is empty")
+                return None
 
         new_conv = copy.deepcopy(conv)
 
@@ -841,8 +853,12 @@ class MultiTurn:
 
         # get rid of tool call
         cutoff_idx = max(tool_start_idx, 0)
+        #original_tool_position = len(conv[2].token_ids) - len(conv[2].token_ids[:cutoff_idx])
         new_conv[2].token_ids = conv[2].token_ids[:cutoff_idx]
         logger.info(f"new_conv[2].token_ids after cutoff: {new_conv[2].token_ids}")
+
+        answer_position_begin_full = None
+        answer_position_end_full = None
 
         # after state
         if alternative_action == "second_model_generation":
@@ -879,6 +895,7 @@ class MultiTurn:
                                                                         image_paths=image_paths,
                                                                         tool=copy.deepcopy(self.tools[0]))
             if alternative_tool_execution is None:
+                logger.info(f"no alternative seq possible: alternative_tool_execution failed")
                 return None
 
             new_tool_call = replace_tool_call(original_tool_call=original_tool_call,
@@ -886,6 +903,7 @@ class MultiTurn:
                               processor = self.processor)
 
             if new_tool_call is None:
+                logger.info(f"no alternative seq possible: replace_tool_call failed")
                 return None
 
             alternative_mt_manager.add_user_message(prompts=alternative_tool_execution["prompts"],
@@ -895,6 +913,36 @@ class MultiTurn:
             alternative_mt_manager.all_multi_turn[idx][2].token_ids += new_tool_call
 
             return alternative_mt_manager
+        elif alternative_action == "alternative_tool_call_without_execution":
+            if image_paths is None or save_path is None or step is None or iou_target is None:
+                raise ValueError(
+                f"to use alternative_action=alternative_tool_call_without_execution, image_paths, save_path, step and iou_target has to be given")
+            if len(self.tools) != 1:
+                # this can be extended for multiple tools, and the concrete one has to be specified by the user
+                raise ValueError(f"to use alternative_action=alternative_tool_call_without_execution, we need exactly one tool")
+            alternative_tool_execution = self.get_alternative_tool_call(save_path=save_path,
+                                                                        tool_call=copy.deepcopy(conv[2].text),
+                                                                        iou_target=iou_target,
+                                                                        step=step,
+                                                                        image_paths=image_paths,
+                                                                        tool=copy.deepcopy(self.tools[0]),
+                                                                        only_return_new_bbox=True)
+
+            new_tool_call = replace_tool_call(original_tool_call=original_tool_call,
+                                              new_bbox=alternative_tool_execution["new_bbox"],
+                                              processor=self.processor)
+
+            if new_tool_call is None:
+                logger.info(f"no alternative seq possible: replace_tool_call failed")
+                return None
+
+            new_conv[2].token_ids += new_tool_call
+            answer_position_begin = len(new_tool_call)
+            answer_position_end = 0
+            alternative_action_len = len(new_tool_call)
+
+            answer_position_begin_full = len(original_tool_call)
+            answer_position_end_full = 0
 
         else:
             raise ValueError(
@@ -904,7 +952,7 @@ class MultiTurn:
         logger.info(f"new_conv[2].token_ids after alternative action: {new_conv[2].token_ids}")
 
         updated_original_conv = copy.deepcopy(conv)
-
+        last_original_turn = 4
         if answer == "ground_truth":
             #the problem is that sometimes the tokenizer concats { with the next special token, e.g. - or \
             #that's why we can't test for the open curly bracket
@@ -914,7 +962,7 @@ class MultiTurn:
                 # add boxed and everything thereafter.
                 new_conv[2].token_ids += ground_truth[1:]
             else:
-                logger.info(f"ground_truth: {ground_truth} is malformed. Skipping")
+                logger.info(f"no alternative seq possible: ground_truth: {ground_truth} is malformed. Skipping")
                 return None
 
             # remove old answer
@@ -937,14 +985,23 @@ class MultiTurn:
             # indices are relative and from the right
             answer_position_begin = len(conv[4].token_ids[box_idx + 2:])
             answer_position_end = 0
+        elif answer == "alternative_tool_parameters":
+            updated_original_conv = updated_original_conv[:3]
+            last_original_turn = 2
 
         logger.info(f"new_conv[2].token_ids after answer: {new_conv[2].token_ids}")
 
         logger.info(f"answer_position_begin: {answer_position_begin}")
         logger.info(f"answer_position_end: {answer_position_end}")
 
+        if answer_position_begin_full is None:
+            answer_position_begin_full = answer_position_begin
+        if answer_position_end_full is None:
+            answer_position_end_full = answer_position_end
+
         # can happen if generation ends with "\boxed{"
         if answer_position_begin == 0:
+            logger.info(f"no alternative seq possible: answer_position_begin == 0")
             return None
 
         logger.info(f"short model generation: {new_conv[2].token_ids}")
@@ -952,7 +1009,7 @@ class MultiTurn:
             f"answer position area token ids: {conv[4].token_ids[-answer_position_begin:len(conv[4].token_ids) - answer_position_end]}")
 
         turn_end_delta_short = 0 if new_conv[2].token_ids[-1] == SPECIAL_TOKENS["turn_end"]["id"] else 1
-        turn_end_delta = 0 if updated_original_conv[4].token_ids[-1] == SPECIAL_TOKENS["turn_end"]["id"] else 1
+        turn_end_delta = 0 if updated_original_conv[last_original_turn].token_ids[-1] == SPECIAL_TOKENS["turn_end"]["id"] else 1
 
         alternative_sequence = get_sequence(new_conv, type="id", add_assistant_start=False, full_image_pad=True)
         sequence = get_sequence(updated_original_conv, type="id", add_assistant_start=False, full_image_pad=True)
@@ -962,22 +1019,25 @@ class MultiTurn:
 
         answer_position_short = (alternative_len - answer_position_begin,
                                  alternative_len - answer_position_end)
-        answer_position = (full_len - answer_position_begin,
-                           full_len - answer_position_end)
+
+
+        answer_position = (full_len - answer_position_begin_full,
+                       full_len - answer_position_end_full)
 
         alternative_action_position_short = (alternative_len - (alternative_action_len + answer_position_begin),
                                              alternative_len - answer_position_begin)
 
         alternative_action_position = (
-                                        full_len - (alternative_action_len + answer_position_begin),
-                                        full_len - answer_position_begin)
+                                        full_len - (alternative_action_len + answer_position_begin_full),
+                                        full_len - answer_position_begin_full)
 
         logger.info(f"answer position: {answer_position}")
         logger.info(f"answer position short: {answer_position_short}")
 
-        assert (sequence[answer_position[0]:answer_position[1]] ==
-                alternative_sequence[answer_position_short[0]:answer_position_short[1]]), \
-            f"the contrasted area should contain the same token ids but got full: {sequence[answer_position[0]:answer_position[1]]} and short: {alternative_sequence[answer_position_short[0]:answer_position_short[1]]} "
+        if answer != "alternative_tool_parameters":
+            assert (sequence[answer_position[0]:answer_position[1]] ==
+                    alternative_sequence[answer_position_short[0]:answer_position_short[1]]), \
+                f"the contrasted area should contain the same token ids but got full: {sequence[answer_position[0]:answer_position[1]]} and short: {alternative_sequence[answer_position_short[0]:answer_position_short[1]]} "
 
         return {"answer_position": answer_position,
         "answer_position_short": answer_position_short,
@@ -1016,7 +1076,7 @@ class MultiTurn:
             if all_multimodal_inputs[idx]["image_path"] != all_multimodal_token_inputs[idx]["image_path"]:
                 logger.debug(f"image paths are different. got: {all_multimodal_token_inputs[idx]["image_path"]} but ground truth is {all_multimodal_inputs[idx]["image_path"]}")
 
-    def get_alternative_tool_call(self, save_path: str, step:int, tool_call: str, iou_target: float, image_paths:list[str], tool: Tool) -> Optional[dict]:
+    def get_alternative_tool_call(self, save_path: str, step:int, tool_call: str, iou_target: float, image_paths:list[str], tool: Tool, only_return_new_bbox:bool=False) -> Optional[dict]:
         """
         if the tool call fails, returns None
         otherwise, returns a dict with 'prompts' and 'image_paths', ready to be fed into self.add_user_message
@@ -1030,7 +1090,10 @@ class MultiTurn:
 
                 if (tool.name == tool_params["name"] or
                    (tool_params["name"] == "crop_image" and tool.name == "crop_image_normalized")):
-                    tool_call_result = tool.call_tool(tool_params, save_path, generate_and_use_new_bbox={"iou_target": iou_target})
+                    tool_call_result = tool.call_tool(tool_params, save_path, generate_and_use_new_bbox={"iou_target": iou_target},
+                                                      only_return_new_bbox=only_return_new_bbox)
+                    if only_return_new_bbox:
+                        return {"new_bbox": tool_call_result["new_bbox"]}
                     logger.info(f"in get_alternative_tool_call: tool_call_result: {tool_call_result}")
 
                     json.dump(

@@ -2000,6 +2000,85 @@ if __name__ == "__main__":
             "contains_full_chkp": True,
             "run_finished": False
         },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_20260120_224520",
+            "checkpoint": [382],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["no_tool", "zoom_in_absolute"],
+            "dataset_name": ["pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+                             #"mme_lite",
+                             #"pixel_reasoner_infovqa",
+                             #{"name": "muffin_chihuahua",
+                             # "grid_pixels": [1, 2, 4, 8],
+                             # "gridsize": [1, 2, 4, 8, 16],
+                             # "mode": ["single_cell_query", "find_outlier"]}
+                             ],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [1024],
+            "evaluate": False,
+            "analyze": False,  # later
+            "contains_full_chkp": True,
+            "run_finished": False
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_long_warmup",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_long_warmup_20260120_224700",
+            "checkpoint": [382],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["no_tool", "zoom_in_absolute"],
+            "dataset_name": ["pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+                             # "mme_lite",
+                             # "pixel_reasoner_infovqa",
+                             # {"name": "muffin_chihuahua",
+                             # "grid_pixels": [1, 2, 4, 8],
+                             # "gridsize": [1, 2, 4, 8, 16],
+                             # "mode": ["single_cell_query", "find_outlier"]}
+                             ],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [1024],
+            "evaluate": False,
+            "analyze": False,  # later
+            "contains_full_chkp": True,
+            "run_finished": False
+        },
+
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_cosine_long_warmup",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_cosine_long_warmup_20260120_235613",
+            "checkpoint": [382],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["no_tool", "zoom_in_absolute"],
+            "dataset_name": ["pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+                             # "mme_lite",
+                             # "pixel_reasoner_infovqa",
+                             # {"name": "muffin_chihuahua",
+                             # "grid_pixels": [1, 2, 4, 8],
+                             # "gridsize": [1, 2, 4, 8, 16],
+                             # "mode": ["single_cell_query", "find_outlier"]}
+                             ],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'max_tokens_per_reply': [1024],
+            "evaluate": False,
+            "analyze": False,  # later
+            "contains_full_chkp": True,
+            "run_finished": False
+        },
+
+
+
+
+
+
 
 
     ]

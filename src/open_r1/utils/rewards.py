@@ -399,33 +399,33 @@ def calculate_mi_reward(contrast_diff: torch.Tensor, delta:float, gamma: float,
     else:
         threshold = tau
 
+    if alpha is None:
+        alpha = 1
+
+    if length_factor_scaling is None:
+        length_factor_scaling = 1
+
+    if length_factor is None:
+        length_factor = 1
+    elif length_factor == "len":
+        length_factor = (length_factor_scaling / len(contrast_diff)) ** alpha
+    else:
+        length_factor = length_factor ** alpha
+
+
     reward = 0.0
     if not contrast_diff.numel() == 0:
 
-        if gamma is not None and delta is not None:
-            raise ValueError("gamma and delta cannot be used together")
-
-        if alpha is not None and length_factor is not None:
-            raise ValueError("alpha and length_factor cannot be used together")
-
-        if length_factor is None:
-            if alpha is None:
-                length_factor = 1
-            else:
-                length_factor = (len(contrast_diff) / length_factor_scaling) ** alpha
-
         if delta is not None:
             reward = torch.mean(torch.where(contrast_diff > delta, 1.0, 0.0) * length_factor)
-
-        if gamma is not None:
-            reward = torch.mean((torch.clamp(contrast_diff, min=-gamma, max=gamma) - threshold) * length_factor)
-
-        if q is not None:
+        elif q is not None:
             distr = torch.clamp(contrast_diff, min=-gamma, max=gamma) - threshold
             original_dtype = distr.dtype
             distr = distr.to(dtype=torch.float)
             reward = torch.quantile(distr, q)
             reward = reward.to(dtype=original_dtype)
+        else:
+            reward = length_factor * torch.sum(torch.clamp(contrast_diff, min=-gamma, max=gamma) - threshold)
 
         if discretize is True:
             if reward < 0:
@@ -434,6 +434,6 @@ def calculate_mi_reward(contrast_diff: torch.Tensor, delta:float, gamma: float,
                 reward = +1
 
         if tanh is True:
-            reward = torch.tanh(torch.sum(torch.clamp(contrast_diff, min=-gamma, max=gamma)) * length_factor)
+            reward = torch.tanh(reward)
 
     return reward

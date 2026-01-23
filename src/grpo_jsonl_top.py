@@ -16,7 +16,7 @@ import os
 
 import json
 from dataclasses import dataclass, field, asdict
-from typing import Optional
+from typing import Optional, Union
 from functools import partial
 from aim.hugging_face import AimCallback
 from trl import GRPOConfig, ModelConfig, ScriptArguments, TrlParser, get_peft_config
@@ -183,13 +183,13 @@ class GRPOScriptArguments(ScriptArguments):
     mutual_information_len_scaling: Optional[float] = field(
         default=None,
         metadata={
-            "help": "the scale factor for length-adaptive reward: (len/len_scaling)^alpha. None means max_generation_len"
+            "help": "the scale factor for length-adaptive reward: (len/len_scaling)^alpha."
         }
     )
-    mutual_information_length_factor: Optional[float] = field(
+    mutual_information_length_factor: Optional[Union[float, str]] = field(
         default=None,
         metadata={
-            "help": "the length factor to alter the full diff: 1/lf sum d_i . use together with tanh"
+            "help": "the length factor to alter the full diff: 1/lf sum d_i . if 'len' then it is the length of the contrasted area"
         }
     )
     mutual_information_mean_threshold: Optional[float] = field(
@@ -230,7 +230,7 @@ class GRPOScriptArguments(ScriptArguments):
     mi_answer_type: Optional[str] = field(
         default=None,
         metadata={
-            "help": "answer type: 'ground_truth', 'full_generation' or 'entropy' (first token)"
+            "help": "answer type: 'ground_truth', 'full_generation' or 'entropy' (first token) or 'alternative_tool_parameters'"
         }
     )
 
@@ -483,7 +483,7 @@ def main(script_args, training_args, model_args):
                                                gamma=script_args.mutual_information_clip_value,
                                                delta=script_args.mutual_information_threshold,
                                                alpha=script_args.mutual_information_len_exponent,
-                                               length_factor_scaling=script_args.mutual_information_len_scaling if script_args.mutual_information_len_scaling is not None else training_args.max_completion_length,
+                                               length_factor_scaling=script_args.mutual_information_len_scaling,
                                                tau=script_args.mutual_information_mean_threshold,
                                                discretize=script_args.mutual_information_discretize,
                                                q=script_args.mutual_information_quantile,

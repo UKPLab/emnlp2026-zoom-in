@@ -318,7 +318,8 @@ class Tool:
     def get_tool_dict(self) -> dict:
         return self.tool_dict
 
-    def call_tool(self, tool_params: dict, save_path: str = None, generate_and_use_new_bbox:dict=None):
+    def call_tool(self, tool_params: dict, save_path: str = None, generate_and_use_new_bbox:dict=None,
+                  only_return_new_bbox:bool=False):
 
         tool_args = tool_params['arguments']
 
@@ -350,6 +351,8 @@ class Tool:
             actual_tool_args["bbox_2d"] = new_bbox
             tool_args["bbox_2d"] = new_bbox
             logger.info(f"Generated new bbox: {new_bbox}")
+            if only_return_new_bbox:
+                return {"new_bbox": new_bbox}
 
         if generate_and_use_new_bbox is not None and generate_and_use_new_bbox["iou_target"] == -1.0:
             # For Black: (0, 0, 0)

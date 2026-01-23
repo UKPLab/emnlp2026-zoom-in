@@ -5,6 +5,7 @@ from open_r1.utils.logger import setup_project_logging
 from vllm import LLM
 from vllm.inputs import TokensPrompt
 from PIL import Image
+from open_r1.utils.tools import Tool, Message, TOOL_CONFIGS
 import sys
 
 logger = setup_project_logging(None)
@@ -31,6 +32,12 @@ if __name__ == "__main__":
                       ]
                       }
 
+    assistant_tool_zoom = {'role': 'assistant',
+                      'content': [
+                          {'type': 'text', 'text': 'Hello <tool_call>{"name": "zoom_in", "arguments": {"bbox_2d": [100, 100, 1000, 1000], "target_image":1}}</tool_call>'}
+                      ]
+                      }
+
     assistant_box = {'role': 'assistant',
                      'content': [
                          {'type': 'text', 'text': "Hello World \\boxed{A}"}
@@ -40,15 +47,34 @@ if __name__ == "__main__":
 
     processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")
 
-    mt = MultiTurn(batch_size=2, processor=processor, tools=None)
+    tool_config = "zoom_in_absolute"
+
+    tool_args = TOOL_CONFIGS["no_tool"] if tool_config is None else [TOOL_CONFIGS[tool_config] for
+                                                                                 tool_config in
+                                                                                 tool_config.split(",")]
+
+    if tool_config != "no_tool":
+        tools = [Tool(name=tool_arg["tool_name"],
+                      template_name=tool_arg["tool_template"],
+                      json_customization=tool_arg["tool_json_customization"],
+
+                      message=Message(tool_arg["tool_message_image_pos"],
+                                      tool_arg["tool_message_text_message"],
+                                      tool_arg["tool_message_text_fillers"]),
+
+                      tool_hparams={"max_pixels": 28*28*5000,
+                                    "min_pixels": 28*28*500,
+                                    "bbox_type": "absolute"})
+                 for tool_arg in tool_args]
+    else:
+        tools = None
+
+
+    mt = MultiTurn(batch_size=2, processor=processor, tools=tools)
 
     mt.add_initial_user_prompt([user_simple, user_simple_2],
                                [default_image, default_image])
 
-    #mt.add_model_reply([[9707,4337], [9707,220]])
-    #print(f"overview: {mt.all_multi_turn}")
-    #print(f"all texts: {mt.get_sequences(type="text")}")
-    #print(f"all token ids: {mt.get_sequences(type="id")}")
     test_vllm = False
     if test_vllm:
 
@@ -63,49 +89,78 @@ if __name__ == "__main__":
         output = llm.generate(vllm_format)
         print(output)
 
+    test = "swap_tool_call"
+
+    if test == "track_crops":
+        assistant_tool_tokenized = processor(text=[assistant_tool["content"][0]["text"]],
+                                             images=None,
+                                             return_tensors=None,
+                                             padding=False,
+                                             add_special_tokens=False,
+                                             return_offsets_mapping=False)
+
+        mt.add_model_reply(assistant_tool_tokenized["input_ids"], mapping=[1])
+
+        mt.add_user_message(prompts = [user_simple_2], image_paths=[default_image], mapping=[1],
+                            absolute_bbox_wrt_target_coordss=[(100, 100, 200, 200)], target_image_idxs=[0])
+        print(f"overview after add_user_message: {mt.all_multi_turn}")
+        mt.add_model_reply(assistant_tool_tokenized["input_ids"], mapping=[1])
+
+        mt.add_user_message(prompts=[user_simple_2], image_paths=[default_image], mapping=[1],
+                            absolute_bbox_wrt_target_coordss=[(10, 10, 50, 50)], target_image_idxs=[1])
+        print(f"overview after add_user_message: {mt.all_multi_turn}")
+        assistant_box_tokenized = processor(text=[assistant_box["content"][0]["text"]],
+                                             images=None,
+                                             return_tensors=None,
+                                             padding=False,
+                                             add_special_tokens=False,
+                                             return_offsets_mapping=False)
+        mt.add_model_reply(assistant_box_tokenized["input_ids"], mapping=[1])
 
 
-    assistant_tool_tokenized = processor(text=[assistant_tool["content"][0]["text"]],
-                                         images=None,
-                                         return_tensors=None,
-                                         padding=False,
-                                         add_special_tokens=False,
-                                         return_offsets_mapping=False)
 
-    mt.add_model_reply(assistant_tool_tokenized["input_ids"], mapping=[1])
+    if test == "remove_image":
+        out = mt.get_alternative_sequences(alternative_action="double_newline,the,answer,is", #"second_model_generation", #
+                                            answer="full_generation",
+                                            ground_truth=["\\boxed{42}",
+                                                          "\\boxed{43}"])
+    elif test == "swap_tool_call":
+        assistant_tool_tokenized = processor(text=[assistant_tool_zoom["content"][0]["text"]],
+                                             images=None,
+                                             return_tensors=None,
+                                             padding=False,
+                                             add_special_tokens=False,
+                                             return_offsets_mapping=False)
 
-    mt.add_user_message(prompts = [user_simple_2], image_paths=[default_image], mapping=[1],
-                        absolute_bbox_wrt_target_coordss=[(100, 100, 200, 200)], target_image_idxs=[0])
-    print(f"overview after add_user_message: {mt.all_multi_turn}")
-    mt.add_model_reply(assistant_tool_tokenized["input_ids"], mapping=[1])
+        mt.add_model_reply(assistant_tool_tokenized["input_ids"], mapping=[1])
+        mt.is_finished[0] = True
+        mt.handle_tool_call(save_path = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/caches/dummy", step=0)
+        mt.add_model_reply(assistant_tool_tokenized["input_ids"], mapping=[1])
 
-    mt.add_user_message(prompts=[user_simple_2], image_paths=[default_image], mapping=[1],
-                        absolute_bbox_wrt_target_coordss=[(10, 10, 50, 50)], target_image_idxs=[1])
-    print(f"overview after add_user_message: {mt.all_multi_turn}")
-    sys.exit()
-    assistant_box_tokenized = processor(text=[assistant_box["content"][0]["text"]],
-                                         images=None,
-                                         return_tensors=None,
-                                         padding=False,
-                                         add_special_tokens=False,
-                                         return_offsets_mapping=False)
-    mt.add_model_reply(assistant_box_tokenized["input_ids"], mapping=[1])
-    #print(mt.all_multi_turn)
-    #input_ids, positions, images_per_sample, considered_seqs = mt.get_shortened_sequences(mode="tool_and_box")
-    #print(f"input_ids: {input_ids}")
-    #print(f"positions: {positions}")
-    #print(f"considered_seqs: {considered_seqs}")
-    out = mt.get_alternative_sequences(alternative_action="double_newline,the,answer,is", #"second_model_generation", #
-                                        answer="full_generation",
-                                        ground_truth=["\\boxed{42}",
-                                                      "\\boxed{43}"])
+
+        out = mt.get_alternative_sequences(alternative_action="alternative_tool_call_without_execution",
+                                            answer="alternative_tool_parameters",
+                                            ground_truth=[],
+                                           save_path = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/caches/dummy",
+                                           step=0,
+                                           iou_target = 0.95
+        )
+        #print(f"input_ids: {out[0]}")
+        #print(f"positions: {out[1]}")
+        #print(f"images_per_sample: {out[2]}")
+        #print(f"considered_seqs: {out[3]}")
+
+
+
     print(f"alternative result: {out}")
+    sys.exit()
     short = out[3][1]["short_sequence"]
     long = out[3][1]["updated_original_sequence"]
     ans_pos = out[3][1]["answer_position"]
     ans_pos_short = out[3][1]["answer_position_short"]
     alt_action_pos = out[3][1]["alternative_action_position"]
     alt_action_pos_short = out[3][1]["alternative_action_position_short"]
+    sys.exit()
     print(f"short: {short}")
     print(f"long: {long}")
     print(f"ans_pos: {long[ans_pos[0]:ans_pos[1]]}")
@@ -115,4 +170,4 @@ if __name__ == "__main__":
     as_text = processor.batch_decode([short, long])
     print(f"as text: {as_text}")
     assistant_end = processor.apply_chat_template([user_simple, assistant_tool])
-    #print(f"assistant_end: {assistant_end}")
+    print(f"assistant_end: {assistant_end}")

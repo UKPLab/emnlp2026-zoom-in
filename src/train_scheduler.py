@@ -268,20 +268,30 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const.json",
             "shell_number": 1,
             "path": "",
-            "state": "running"
+            "state": "done"
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_long_warmup.json",
             "shell_number": 2,
             "path": "",
-            "state": "running"
+            "state": "done"
         },
         {
             "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_cosine_long_warmup.json",
             "shell_number": 3,
             "path": "",
+            "state": "done"
+        },
+
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_long_curr_sum_max_0p6_conditional_infonce_tool_params.json",
+            "shell_number": 1,
+            "path": "",
             "state": "to_be_launched"
         },
+
+
+
 
     ]
 
