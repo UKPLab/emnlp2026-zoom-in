@@ -29,7 +29,7 @@ def get_resized_image_scales(height:int, width:int, min_pixels:int=None, max_pix
 
     return resized_height, resized_width
 
-def basic_iou_target_fn(step, start:int, end:int, increase: str, max_value: float = None):
+def basic_iou_target_fn(step, start:float, end:float, increase: str, max_value: float = None):
     if max_value is None:
         max_value = 1.0
     if increase == "linear":

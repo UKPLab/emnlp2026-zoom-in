@@ -163,6 +163,44 @@ def make_hf_dataset(dataset_names, data_folders, image_folders, reward_method=No
 
                     all_data.append(item)
 
+        elif dataset_name == "visual_probe_train":
+            with open(data_file, 'r') as f:
+                for line in f:
+                    item = json.loads(line)
+                    item["problem"] = item.pop("question")
+                    item["solution"] = [item.pop("answer")]
+
+                    assert len(item["image"]) == 1, f"Only one image is expected, but got {item['image']}"
+
+                    item["image_path"] = [os.path.join(image_folder, item["image"][0])]
+
+                    del item["image"]
+
+                    item["accu_reward_method"] = accu_reward_method
+
+                    all_data.append(item)
+
+        elif dataset_name == "deepeyes_train_4k":
+            with open(data_file, 'r') as f:
+                for line in f:
+                    item = json.loads(line)
+                    problem = item.pop("question")
+
+                    item["problem"] = f"{problem}\nIf there are choices given, answer with the option's letter from the given choices directly."
+
+                    item["solution"] = [item.pop("answer")]
+
+                    assert len(item["image"]) == 1, f"Only one image is expected, but got {item['image']}"
+
+                    item["image_path"] = [os.path.join(image_folder, item["image"][0])]
+
+                    del item["image"]
+
+                    item["accu_reward_method"] = accu_reward_method
+
+                    all_data.append(item)
+
+
         elif dataset_name == "pixel_reasoner":
             non_singular_answers = {}
             image_path_dist = {}

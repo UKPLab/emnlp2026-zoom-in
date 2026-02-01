@@ -1114,7 +1114,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         # Broadcast the completions from the main process to all processes, ensuring each process receives its
         # corresponding slice.
 
-        all_image_paths = broadcast_object_list(all_image_paths, from_process=0)
+        #all_image_paths = broadcast_object_list(all_image_paths, from_process=0)
         #logger.info(f"Before overall_tools_used broadcast: {overall_tools_used}")
         overall_tools_used = broadcast_object_list(overall_tools_used, from_process=0)
         #logger.info("after broadcast object list")
@@ -1281,7 +1281,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
             if use_mi_reward:
                 if self.iou_target_fn is not None:
-                    iou_target = self.iou_target_fn(self.state.global_step)
+                    iou_target = self.iou_target_fn(self.state.global_step / self.state.max_steps)
                     self._metrics["iou_target"].append(iou_target)
                     if iou_target >= 1:
                         stop_using_mi_rewards = True
@@ -1293,14 +1293,20 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                         ground_truth=[random.choice(inp["solution"]) for inp in inputs],
                         save_path=os.path.join(self.save_path, "tool_calls"),
                         step=self.state.global_step,
-                        iou_target=iou_target
+                        iou_target=iou_target,
+                        tool_turn_selection=self.mi_mode["tool_turn_selection"]
                     )
                     if self.mi_mode["alternative_action"] == "alternative_tool_call":
                         alternative_mt_manager = input_ids_mi
                         #logger.info(f"alternative mt manager: {alternative_mt_manager.all_multi_turn}")
 
-                        changed_idxs = image_positions_mi
+                        changed_idxs = [True if i is not False else False for i in image_positions_mi]
+                        tool_turns = image_positions_mi
                         logger.info(f"changed_idxs: {changed_idxs}")
+                        local_tools_used = overall_tools_used[process_slice]
+                        logger.info(f"local tools used: {local_tools_used}")
+                        unchanged_but_tool_used = [idx for idx in range(len(local_tools_used)) if changed_idxs[idx] is False and local_tools_used[idx] > 0]
+                        logger.info(f"unchanged_but_tool_used: {unchanged_but_tool_used}")
 
                         pixel_values_mi = alternative_mt_manager.get_multimodal(type="pixel_values")
                         image_grid_thw_mi = alternative_mt_manager.get_multimodal(type="image_grid_thw")
@@ -1313,7 +1319,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                         for conv_idx in range(len(positions)):
                             if changed_idxs[conv_idx]:
                                 for turn_idx in range(len(positions[conv_idx])):
-                                    if positions[conv_idx][turn_idx]["turn"] == 4:
+                                    if positions[conv_idx][turn_idx]["turn"] == tool_turns[conv_idx]+2:
                                         considered_seqs.append({"contrasted_area_short": [positions[conv_idx][turn_idx]["start"],
                                                                                           positions[conv_idx][turn_idx]["end"]],
                                                                 "contrasted_area":[original_positions[conv_idx][turn_idx]["start"],
@@ -1474,6 +1480,12 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                             if self.mi_mode["alternative_action"] == "alternative_tool_call":
                                 original_score = full_forward_score[idx, contrasted_area[0] - 1: contrasted_area[1] - 1]
                                 alternative_score = vision_masked_per_token_score[idx, contrasted_area_short[0] - 1: contrasted_area_short[1] - 1]
+
+                                # TODO: unify the contrasted_score_type!
+                                if self.mi_mode["contrasted_score_type"] == "per_sequence":
+                                    original_score = torch.sum(original_score, dim=0, keepdim=True)
+                                    alternative_score = torch.sum(alternative_score, dim=0, keepdim=True)
+
                             else:
                                 answer_scores_full = full_forward_score[idx,contrasted_area[0] - 1:contrasted_area[1] - 1]
 
@@ -1485,7 +1497,8 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
                                 logger.info(f"answer_scores_short before multiplication: {answer_scores_short}")
 
-                                if contrasted_area[1] - contrasted_area[0]  !=  contrasted_area_short[1] - contrasted_area_short[0]:
+                                #if contrasted_area[1] - contrasted_area[0]  !=  contrasted_area_short[1] - contrasted_area_short[0]:
+                                if self.mi_mode["contrasted_score_type"] == "per_sequence":
                                     answer_scores_full = torch.sum(answer_scores_full, dim=0, keepdim=True)
                                     answer_scores_short = torch.sum(answer_scores_short, dim=0, keepdim=True)
 
@@ -1635,6 +1648,8 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         logger.info(f"after per-instance rewards")
         # Gather rewards across processes
         completion_rewards_per_func = self.accelerator.gather(completion_rewards_per_func)
+
+        logger.info(f"completion_rewards_per_func: {completion_rewards_per_func}")
 
         # note that overall_tools_used is global, whereas prompts and completions are local, so group rewards should
         # not use prompts or completions directly

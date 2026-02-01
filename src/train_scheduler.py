@@ -161,12 +161,21 @@ def run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, tra
     
     print("Training pipeline started successfully!")
     print("Monitoring training process... Press Ctrl+C to stop monitoring but keep training running.")
-    
+
+
+    wait_schedule = [5] * 12
+    wait_schedule += [10] * 6 * 9
+    wait_idx = 0
     try:
         # Continuously check if training has finished
         while is_screen_active(train_screen_name):
-            print(f"Training is still running. Checking again in 60 seconds...")
-            time.sleep(60)
+            if wait_idx < len(wait_schedule):
+                wait_time = wait_schedule[wait_idx]
+                wait_idx += 1
+            else:
+                wait_time = 60
+            print(f"Training is still running. Checking again in {wait_time} seconds...")
+            time.sleep(wait_time)
         
         print("Training has completed!")
     except KeyboardInterrupt:
@@ -262,43 +271,33 @@ if __name__ == "__main__":
 
     runs = [
 
-
-
         {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const.json",
-            "shell_number": 1,
-            "path": "",
-            "state": "done"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_long_warmup.json",
-            "shell_number": 2,
-            "path": "",
-            "state": "done"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_cosine_long_warmup.json",
-            "shell_number": 3,
-            "path": "",
-            "state": "done"
-        },
-
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_long_curr_sum_max_0p6_conditional_infonce_tool_params.json",
+            "json_name": "Qwen_2p5_7B_mini_o3_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 1,
             "path": "",
             "state": "to_be_launched"
         },
 
+        {
+            "json_name": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5.json",
+            "shell_number": 2,
+            "path": "",
+            "state": "running"
+        },
 
-
+        {
+            "json_name": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
+            "shell_number": 3,
+            "path": "",
+            "state": "running"
+        },
 
     ]
 
     for run in runs:
         if run["state"] == "to_be_launched":
-            vllm_screen_name = f"{run['shell_number']}_auto_vllm_2"
-            train_screen_name = f"{run['shell_number']}_auto_run_2"
+            vllm_screen_name = f"{run['shell_number']}_auto_vllm"
+            train_screen_name = f"{run['shell_number']}_auto_run"
 
             available_gpus = None #, "2", "3", "4"]
             reuse_vllm = True

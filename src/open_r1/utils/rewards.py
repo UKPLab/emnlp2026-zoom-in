@@ -410,7 +410,7 @@ def calculate_mi_reward(contrast_diff: torch.Tensor, delta:float, gamma: float,
     elif length_factor == "len":
         length_factor = (length_factor_scaling / len(contrast_diff)) ** alpha
     else:
-        length_factor = length_factor ** alpha
+        length_factor = float(length_factor) ** alpha
 
 
     reward = 0.0
@@ -425,7 +425,9 @@ def calculate_mi_reward(contrast_diff: torch.Tensor, delta:float, gamma: float,
             reward = torch.quantile(distr, q)
             reward = reward.to(dtype=original_dtype)
         else:
-            reward = length_factor * torch.sum(torch.clamp(contrast_diff, min=-gamma, max=gamma) - threshold)
+            if gamma is not None:
+                contrast_diff = torch.clamp(contrast_diff, min=-gamma, max=gamma)
+            reward = length_factor * torch.sum(contrast_diff - threshold)
 
         if discretize is True:
             if reward < 0:

@@ -283,10 +283,24 @@ class GRPOScriptArguments(ScriptArguments):
         }
     )
 
+    mi_contrasted_score_type: Optional[str] = field(
+        default="per_token",
+        metadata={
+            "help": "whether to contrast the sequence on token or sequence level (i.e. summing over token logps). choose from ['per_token', 'per_sequence']"
+        }
+    )
+
     mi_use_info_nce: Optional[bool] = field(
         default=False,
         metadata={
             "help": "whether to use log((full + full) / (full + short)) instead of log(full/short)"
+        }
+    )
+
+    mi_tool_turn_selection: Optional[str] = field(
+        default='last',
+        metadata={
+            "help": "tool selection strategy. choose from ['random', 'last', 'first']"
         }
     )
 
@@ -502,8 +516,8 @@ def main(script_args, training_args, model_args):
     if script_args.iou_target_zero is None or script_args.iou_target_one is None or script_args.iou_target_increase is None:
         iou_target_fn = None
     else:
-        iou_target_fn = partial(basic_iou_target_fn, start=int(script_args.iou_target_zero * 1146),
-                            end=int(script_args.iou_target_one * 1146), increase = script_args.iou_target_increase,
+        iou_target_fn = partial(basic_iou_target_fn, start=script_args.iou_target_zero,
+                            end=script_args.iou_target_one, increase = script_args.iou_target_increase,
                                 max_value=script_args.iou_target_max_value)
 
     # Load the VLM module
@@ -618,12 +632,14 @@ def main(script_args, training_args, model_args):
 
     mi_mode = {
                "contrasted_score": script_args.mi_contrasted_score,
+               "contrasted_score_type": script_args.mi_contrasted_score_type,
                "alternative_action": script_args.mi_alternative_action,
                "answer_type": script_args.mi_answer_type,
                "use_advantages_directly": script_args.mi_use_advantages_directly,
                "custom_advantage_position": script_args.mi_custom_advantage_position,
                "importance_sampling": script_args.mi_importance_sampling,
-               "use_info_nce": script_args.mi_use_info_nce
+               "use_info_nce": script_args.mi_use_info_nce,
+                "tool_turn_selection": script_args.mi_tool_turn_selection
     }
 
 

@@ -89,7 +89,7 @@ if __name__ == "__main__":
         output = llm.generate(vllm_format)
         print(output)
 
-    test = "swap_tool_call"
+    test = "swap_tool_call" #"swap_tool_call" "remove_image"
 
     if test == "track_crops":
         assistant_tool_tokenized = processor(text=[assistant_tool["content"][0]["text"]],
@@ -120,10 +120,36 @@ if __name__ == "__main__":
 
 
     if test == "remove_image":
+        mt.is_finished[0] = True
+        assistant_tokenized = processor(text=[assistant_tool["content"][0]["text"]],
+                                             images=None,
+                                             return_tensors=None,
+                                             padding=False,
+                                             add_special_tokens=False,
+                                             return_offsets_mapping=False)
+        mt.add_model_reply(assistant_tokenized["input_ids"], mapping=[1])
+
+        mt.add_user_message([user_simple_2], None, [1])
+        mt.add_model_reply(assistant_tokenized["input_ids"], mapping=[1])
+
+        mt.add_user_message([user_simple_2], None, [1])
+        assistant_box_tokenized = processor(text=[assistant_box["content"][0]["text"]],
+                                        images=None,
+                                        return_tensors=None,
+                                        padding=False,
+                                        add_special_tokens=False,
+                                        return_offsets_mapping=False)
+        mt.add_model_reply(assistant_tokenized["input_ids"], mapping=[1])
+
+        mt.add_user_message([user_simple_2], None, [1])
+        mt.add_model_reply(assistant_box_tokenized["input_ids"], mapping=[1])
+
         out = mt.get_alternative_sequences(alternative_action="double_newline,the,answer,is", #"second_model_generation", #
                                             answer="full_generation",
                                             ground_truth=["\\boxed{42}",
-                                                          "\\boxed{43}"])
+                                                          "\\boxed{43}"],
+                                           tool_turn_selection="last")
+
     elif test == "swap_tool_call":
         assistant_tool_tokenized = processor(text=[assistant_tool_zoom["content"][0]["text"]],
                                              images=None,
@@ -136,14 +162,17 @@ if __name__ == "__main__":
         mt.is_finished[0] = True
         mt.handle_tool_call(save_path = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/caches/dummy", step=0)
         mt.add_model_reply(assistant_tool_tokenized["input_ids"], mapping=[1])
+        mt.handle_tool_call(save_path="/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/caches/dummy", step=0)
+        mt.add_model_reply(assistant_tool_tokenized["input_ids"], mapping=[1])
 
 
-        out = mt.get_alternative_sequences(alternative_action="alternative_tool_call_without_execution",
+        out = mt.get_alternative_sequences(alternative_action="alternative_tool_call",#without_execution
                                             answer="alternative_tool_parameters",
                                             ground_truth=[],
                                            save_path = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/caches/dummy",
                                            step=0,
-                                           iou_target = 0.95
+                                           iou_target = 0.95,
+                                           tool_turn_selection="first"
         )
         #print(f"input_ids: {out[0]}")
         #print(f"positions: {out[1]}")
@@ -152,8 +181,8 @@ if __name__ == "__main__":
 
 
 
-    print(f"alternative result: {out}")
-    sys.exit()
+    #print(f"alternative result: {out}")
+
     short = out[3][1]["short_sequence"]
     long = out[3][1]["updated_original_sequence"]
     ans_pos = out[3][1]["answer_position"]

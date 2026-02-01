@@ -1,0 +1,67 @@
+{
+  "train_params": {
+    "output_dir_prefix": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/runs",
+    "model_name_or_path": "Qwen/Qwen2.5-VL-7B-Instruct",
+    "deepspeed": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/scripts/zero3.json",
+    "dataset_name": "visual_probe_train",
+    "data_file_paths": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/mini_o3/visual_probe_train/train.jsonl",
+    "image_folders": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/mini_o3/visual_probe_train",
+    "max_completion_length": 1024,
+    "ds3_gather_for_generation": true,
+    "use_vllm": true,
+    "beta": 0.04,
+    "num_generations": 8,
+    "per_device_train_batch_size": 2,
+    "scoring_batch_size_multiplier": 1,
+    "gradient_accumulation_steps": 20,
+    "num_iterations": 2,
+    "steps_per_generation": 20,
+    "generation_batch_size": 280,
+    "gradient_checkpointing": true,
+    "torch_dtype": "bfloat16",
+    "attn_implementation": "flash_attention_2",
+    "bf16": true,
+    "logging_steps": 1,
+    "logging": true,
+    "num_train_epochs": 1,
+    "temperature": 1.0,
+    "multi_turn": "tool",
+    "reward_funcs": [
+      "accuracy",
+      "pr_penalty",
+      "curiosity"
+    ],
+    "reward_func_weights": [
+      1.0,
+      0.05,
+      0.5
+    ],
+    "tool_use_penalty_threshold": 1,
+    "pixel_reasoning_threshold": 0.3,
+    "chat_template": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/qwen_chat_template_tool.json",
+    "per_device_eval_batch_size": 4,
+    "learning_rate": 1e-6,
+    "lr_scheduler_type": "cosine",
+    "warmup_ratio": 0.03,
+    "max_tool_uses": 2,
+    "max_pixels": 3920000,
+    "min_pixels": 392000,
+    "epsilon": 0.2,
+    "tool_config": "zoom_in_absolute",
+    "tool_bbox_type": "absolute",
+    "strict_tool_extraction": true,
+    "global_buffer": true,
+    "save_strategy": "epoch",
+    "save_only_model": false,
+    "vllm_server_timeout": 600.0,
+    "shuffle_dataset": true
+  },
+  "vllm_params": {
+    "model": "infer",
+    "min_pixels": "infer",
+    "max_pixels": "infer",
+    "enable_prefix_caching": true,
+    "limit_image_per_prompt": 4
+  }
+}
+

@@ -59,8 +59,8 @@ def get_results(path:str, metrics: list[str]):
             if metric == "ious":
                 distr = []
                 for i in range(len(data["ious"])):
-                    distr.append(np.mean(np.array(data["ious"][i])))
-                result[metric] = distr
+                    distr.append(np.mean(np.array(data["ious"][i])).round(4).item()*100)
+                result[metric] = ";".join([str(d) for d in distr])
             if metric == "avg_total_completion_len":
                 result[metric] = np.mean(np.array([sum(sample) for sample in data["completion_len"]]))
             if metric == "avg_first_completion_len":
