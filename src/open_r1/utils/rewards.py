@@ -356,7 +356,8 @@ def iou_reward(bbox_estimate:list[list[tuple[int, int, int, int]]], bbox:list[tu
 def mutual_information_reward(absolute_diff:torch.Tensor, contrasted_area: torch.Tensor, contrast_diff_list: list[torch.Tensor],
                               delta:float, gamma: float,
                               alpha:float, length_factor_scaling:int, tau:float, discretize:bool, q:float,
-                              ignored_prefix_len: int, tanh: bool, length_factor: float, **kwargs):
+                              ignored_prefix_len: int, tanh: bool, length_factor: float,
+                              select_k:int, select_k_type: str, **kwargs):
 
     if ignored_prefix_len is None:
         ignored_prefix_len = 0
@@ -367,7 +368,22 @@ def mutual_information_reward(absolute_diff:torch.Tensor, contrasted_area: torch
             if contrast_diff is None:
                 rewards.append(0.0)
             else:
-                rewards.append(calculate_mi_reward(contrast_diff, delta = delta, gamma = gamma, alpha = alpha, tau=tau,
+                if select_k is not None and select_k_type is not None:
+                    k = min(select_k, len(contrast_diff))
+                    if select_k_type == "first":
+                        contrast_diff_area = contrast_diff[:k]
+                    elif select_k_type == "max":
+                        if select_k >= len(contrast_diff):
+                            contrast_diff_area = contrast_diff
+                        else:
+                            contrast_diff_area = torch.topk(contrast_diff, k, largest=True, sorted=True)
+                    else:
+                        raise ValueError(f"Invalid select_k_type: {select_k_type}")
+                else:
+                    contrast_diff_area = contrast_diff
+
+
+                rewards.append(calculate_mi_reward(contrast_diff_area, delta = delta, gamma = gamma, alpha = alpha, tau=tau,
                                                    discretize=discretize, q=q, tanh=tanh,
                                                    length_factor_scaling=length_factor_scaling,
                                                    length_factor=length_factor))

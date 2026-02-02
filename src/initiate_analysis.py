@@ -2468,7 +2468,7 @@ if __name__ == "__main__":
         metrics_to_keep_for_export = ["accuracy",
                                     "ANLS",
                                     "avg_pixel_reasoning",
-                                    #"zoom_in_fraction_median",
+                                    "zoom_in_fraction_median",
                                     "ious"
                                       ]
 

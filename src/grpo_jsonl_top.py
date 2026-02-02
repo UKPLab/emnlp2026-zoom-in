@@ -213,6 +213,20 @@ class GRPOScriptArguments(ScriptArguments):
         }
     )
 
+    mutual_information_select_k: Optional[int] = field(
+        default = None,
+        metadata={
+            "help": "only use k values for further processing. they are determined by select_k_type"
+        }
+    )
+
+    mutual_information_select_k_type: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "how to choose the k values of select_k. choose from 'first', 'max'"
+        }
+    )
+
     mi_tanh: Optional[bool] = field(
         default = False,
         metadata={
@@ -503,7 +517,9 @@ def main(script_args, training_args, model_args):
                                                q=script_args.mutual_information_quantile,
                                                ignored_prefix_len=script_args.ignored_prefix_len,
                                                tanh=script_args.mi_tanh,
-                                               length_factor=script_args.mutual_information_length_factor),
+                                               length_factor=script_args.mutual_information_length_factor,
+                                               select_k=script_args.mutual_information_select_k,
+                                               select_k_type=script_args.mutual_information_select_k_type),
                                "type": "per_completion",
                                "name": "mutual_information"},
         "constant_exploration": {"func": constant_exploration,

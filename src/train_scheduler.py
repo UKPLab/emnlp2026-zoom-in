@@ -275,7 +275,7 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_mini_o3_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
             "shell_number": 1,
             "path": "",
-            "state": "to_be_launched"
+            "state": "wait"
         },
 
         {
@@ -287,9 +287,15 @@ if __name__ == "__main__":
 
         {
             "json_name": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
-            "shell_number": 3,
+            "shell_number": 1, # actually on 3, this is just for diagnostics
             "path": "",
-            "state": "running"
+            "state": "to_be_launched"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
+            "shell_number": 1,  # just for diagnostics
+            "path": "",
+            "state": "wait"
         },
 
     ]
@@ -315,5 +321,5 @@ if __name__ == "__main__":
             print(f"hf_command: {train_command}")
 
             run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, train_command, output_dir=output_dir,
-                                  ignore_vllm=False, keep_vllm_alive=False,
+                                  ignore_vllm=False, keep_vllm_alive=True,
                                   available_gpus=available_gpus)

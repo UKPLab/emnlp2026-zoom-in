@@ -72,6 +72,7 @@ from functools import partial
 from torch.utils.data import DataLoader
 from transformers.trainer_utils import seed_worker
 
+from open_r1.utils.debug_utils import serialized_size_mb
 
 if is_peft_available():
     from peft import PeftConfig, get_peft_model
@@ -96,6 +97,7 @@ from open_r1.utils.logger import get_logger
 
 # Get logger for this module
 logger = get_logger(__name__)
+
 
 
 class RepeatSampler(Sampler):
@@ -1062,6 +1064,11 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                     for idx in range(no_conversations):
                         if self.tool_handling["max_tool_uses"] is not None and multi_turn_manager.get_no_tool_calls(idx) > self.tool_handling["max_tool_uses"]:
                             multi_turn_manager.is_finished[idx] = True
+                            # in this case, the last tool execution is at the end of the sequence.
+                            # We don't generate further and will anyway mask it for the backward pass.
+                            # That's why it is more efficient to remove it from the sequence. (saves up to 5k visual tokens)
+                            if multi_turn_manager.all_multi_turn[idx][-1].role == "assistant":
+                                multi_turn_manager.all_multi_turn[idx] = multi_turn_manager.all_multi_turn[idx][:-1]
                 else:
                     raise ValueError(f"Invalid value for multi_turn: {self.multi_turn}. Choose from None, 'text', 'image', or 'tool'")
 
@@ -1110,24 +1117,40 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
             overall_tools_used = [None] * len(all_histories)
 
-        #logger.info(f"({rank}) Completion ids: {[len(lst) if lst is not None else 0 for lst in completion_ids]}")
-        # Broadcast the completions from the main process to all processes, ensuring each process receives its
-        # corresponding slice.
-
-        #all_image_paths = broadcast_object_list(all_image_paths, from_process=0)
-        #logger.info(f"Before overall_tools_used broadcast: {overall_tools_used}")
         overall_tools_used = broadcast_object_list(overall_tools_used, from_process=0)
-        #logger.info("after broadcast object list")
-        all_multi_turn = broadcast_object_list(all_multi_turn, from_process=0)
+
+        def timed(msg, fn):
+            t0 = time.time()
+            out = fn()
+            dt = time.time() - t0
+            print(f"[rank {dist.get_rank()}] {msg}: {dt:.3f}s")
+            return out
+
+        logger.info(f"len all_multi_turn before split: {len(all_multi_turn)}")
+        #make into list of num_processes lists such that each of them can be sent to a different process by scatter
+        all_multi_turn = [all_multi_turn[i:i + len(prompts)] for i in range(0, len(all_multi_turn), len(prompts))]
+        logger.info(f"len all_multi_turn after split: {len(all_multi_turn)}")
+
+        size_mb_all = serialized_size_mb(all_multi_turn[dist.get_rank()])
+        logger.info(f"broadcast payload size all: {size_mb_all} MB")
+
+        timed("barrier-before-broadcast", lambda: dist.barrier())
+        timed("broadcast_object_list", lambda: dist.scatter_object_list(scatter_object_output_list=all_multi_turn,
+                                                                                         scatter_object_input_list=all_multi_turn,
+                                                                                         src=0))
+        timed("barrier-after-broadcast", lambda: dist.barrier())
 
 
-        #logger.info(f"({rank}) Completion ids: {[len(lst) if lst is not None else 0 for lst in completion_ids]}")
+        logger.info(f"len all_multi_turn after broadcast: {len(all_multi_turn)}")
+        all_multi_turn = all_multi_turn[0]
+        logger.info(f"len all_multi_turn after shorten: {len(all_multi_turn)}")
+
         process_slice = slice(
             self.accelerator.process_index * len(prompts),
             (self.accelerator.process_index + 1) * len(prompts),
         )
 
-        all_multi_turn = all_multi_turn[process_slice]
+        #all_multi_turn = all_multi_turn[process_slice]
         multi_turn_manager = MultiTurn(batch_size=len(all_multi_turn),
                                        processor=self.processing_class,
                                        tools=self.tools)
