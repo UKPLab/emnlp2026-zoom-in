@@ -200,7 +200,7 @@ def signal_handler(sig, frame):
     print("\nScript interrupted by user. Exiting monitoring mode...")
     sys.exit(0)
 
-def get_commands(hparams: dict, run_name: str, available_gpus=None, reuse_vllm=False):
+def get_commands(hparams: dict, run_name: str, available_gpus=None, reuse_vllm=False, ignore_vllm=False):
 
     resume = False
     if "output_dir" in hparams["train_params"]:
@@ -255,9 +255,8 @@ def get_commands(hparams: dict, run_name: str, available_gpus=None, reuse_vllm=F
 
     hf_cmd = hf_cmd + f" --training_mode singlenode"
     hf_cmd = hf_cmd + f" --vllm_server_port {8000 + vllm_port_offset}"
-
-
-
+    if ignore_vllm:
+        hf_cmd = hf_cmd + f" --dummy_vllm_generation load"
 
 
     return vllm_cmd, hf_cmd, output_dir, vllm_port_offset
@@ -270,34 +269,32 @@ if __name__ == "__main__":
 
 
     runs = [
-
         {
-            "json_name": "Qwen_2p5_7B_mini_o3_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_conditional_constant_tool_0p025.json",
             "shell_number": 1,
             "path": "",
-            "state": "wait"
+            "state": "running"
         },
-
         {
-            "json_name": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5.json",
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_30_100_17p5_first_20_mean.json",
             "shell_number": 2,
             "path": "",
             "state": "running"
         },
-
         {
-            "json_name": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
-            "shell_number": 1, # actually on 3, this is just for diagnostics
+            "json_name": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_continue_pr.json",
+            "shell_number": 3,
+            "path": "",
+            "state": "crashed"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_conditional_constant_tool_1p0.json",
+            "shell_number": 3,
             "path": "",
             "state": "to_be_launched"
         },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500.json",
-            "shell_number": 1,  # just for diagnostics
-            "path": "",
-            "state": "wait"
-        },
 
+        
     ]
 
     for run in runs:
@@ -307,6 +304,8 @@ if __name__ == "__main__":
 
             available_gpus = None #, "2", "3", "4"]
             reuse_vllm = True
+            ignore_vllm = False
+            keep_vllm_alive = False
 
             # Run the training pipeline
             current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -315,11 +314,11 @@ if __name__ == "__main__":
 
             run_name = run["json_name"].removesuffix(".json")
 
-            vllm_command, train_command, output_dir, vllm_port_offset = get_commands(full_hparams, run_name, available_gpus, reuse_vllm)
+            vllm_command, train_command, output_dir, vllm_port_offset = get_commands(full_hparams, run_name, available_gpus, reuse_vllm, ignore_vllm)
             print(f"starting run: {run_name}")
             print(f"vllm_command: {vllm_command}")
             print(f"hf_command: {train_command}")
 
             run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, train_command, output_dir=output_dir,
-                                  ignore_vllm=False, keep_vllm_alive=True,
+                                  ignore_vllm=ignore_vllm, keep_vllm_alive=keep_vllm_alive,
                                   available_gpus=available_gpus)

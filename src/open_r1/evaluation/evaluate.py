@@ -276,11 +276,9 @@ class Evaluator:
 
         logger.info(f"all_multimodal_token_inputs: {all_multimodal_token_inputs}")
 
-
+        max_generation_attempts = 5
         conv_round = 0
         max_conv_rounds = 10  # just for safety that we don't get stuck in endless loop. max tool calls should prevent it
-
-        max_generation_attempts = 5
 
         while not all(multi_turn_manager.is_finished) and conv_round < max_conv_rounds:
             vllm_generation_has_worked = False

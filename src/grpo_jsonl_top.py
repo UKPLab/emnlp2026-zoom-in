@@ -438,6 +438,17 @@ class GRPOScriptArguments(ScriptArguments):
         }
     )
 
+    dummy_vllm_generation: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "dummy_vllm_generation: save, load, None. "
+                    "save: save the generated multi-turn and tool use to disk. "
+                    "load: load the generated multi-turn and tool use from disk. "
+                    "None: do not save or load"
+                    "can be used for debugging to skip the time-consuming vllm generation"
+        }
+    )
+
 @dataclass
 class GRPOModelConfig(ModelConfig):
     freeze_vision_modules: bool = False
@@ -704,6 +715,7 @@ def main(script_args, training_args, model_args):
             scoring_batch_size_multiplier = script_args.scoring_batch_size_multiplier,
             exploration_pruning_schedule=exploration_pruning_schedule,
             iou_target_fn=iou_target_fn,
+            dummy_vllm_generation=script_args.dummy_vllm_generation,
         )
     else:
         trainer = trainer_cls(

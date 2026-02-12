@@ -8,6 +8,9 @@ import torch
 from datetime import datetime
 
 from .utils import calculate_iou
+from .logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def extract_choice(text):
@@ -369,20 +372,24 @@ def mutual_information_reward(absolute_diff:torch.Tensor, contrasted_area: torch
                 rewards.append(0.0)
             else:
                 if select_k is not None and select_k_type is not None:
+                    logger.info(f"in reward, contrast diff: {contrast_diff}")
+                    logger.info(f"in reward, contrast diff len: {len(contrast_diff)}")
+                    
                     k = min(select_k, len(contrast_diff))
+                    logger.info(f"in reward, k={k}")
                     if select_k_type == "first":
                         contrast_diff_area = contrast_diff[:k]
                     elif select_k_type == "max":
                         if select_k >= len(contrast_diff):
                             contrast_diff_area = contrast_diff
                         else:
-                            contrast_diff_area = torch.topk(contrast_diff, k, largest=True, sorted=True)
+                            contrast_diff_area, _ = torch.topk(contrast_diff, k, largest=True, sorted=True)
                     else:
                         raise ValueError(f"Invalid select_k_type: {select_k_type}")
                 else:
                     contrast_diff_area = contrast_diff
 
-
+                logger.info(f"in reward, contrast_diff_area={contrast_diff_area}")
                 rewards.append(calculate_mi_reward(contrast_diff_area, delta = delta, gamma = gamma, alpha = alpha, tau=tau,
                                                    discretize=discretize, q=q, tanh=tanh,
                                                    length_factor_scaling=length_factor_scaling,

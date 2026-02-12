@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import re
 
 path_prefix = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/runs/"
 # total_matches = 2674
@@ -8,7 +9,9 @@ path_prefix = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/ru
 #"Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_long_curr_20251216_113951"
 "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_random_sum_20260102_183643" # 2247
 "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_long_curr_sum_20260102_183159" # 2247
-run_path = "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_random_sum_20260102_183643"
+"Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_random_sum_20260102_183643" # 1337
+
+run_path = "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_no_tanh_20260128_142853"
 
 filepath = os.path.join(path_prefix, run_path, "run_log.txt")
 with open(filepath) as f:
@@ -21,7 +24,7 @@ search_string = f"model_generations for reward calculation:"
 too_longs = []
 print(len(lines))
 matches = 0.0
-total_matches = 2247
+total_matches = 1337
 targets = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 0.9])
 for line in lines:
     if search_string in line:
@@ -34,7 +37,8 @@ for line in lines:
         #print("found!")
         #print(line)
         try:
-            splitted = line.split("'")
+            print(line)
+            splitted = re.split(r"(?<!\\)'", line)
             second_gen = splitted[1].split("</tool_call>")[-1]
             print(second_gen)
         except Exception:

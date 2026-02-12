@@ -269,13 +269,20 @@ if __name__ == "__main__":
                  "remote_repo_id": "Mini-o3/DeepEyes_train_4K",
                  "remote_text_data": "https://huggingface.co/datasets/Mini-o3/VisualProbe_train/resolve/main/train.json",
                  "local_base": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/mini_o3/deepeyes_train_4k",
+                 },
+
+                {"dataset_name": "VisualProbe_Easy",
+                 "dataset_type": "directory",
+                 "remote_repo_id": "Mini-o3/VisualProbe_Easy",
+                 "remote_text_data": "https://huggingface.co/datasets/Mini-o3/VisualProbe_Easy/resolve/main/val.json",
+                 "local_base": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/mini_o3/visual_probe_easy",
                  }
 
                 ]
 
-        do_download = False
+        do_download = True
 
-        for idx in [6]:
+        for idx in [7]:
             dataset = datasets[idx]
             if dataset["dataset_type"] == "parquet":
                 remote_base = dataset["remote_base"]
@@ -319,6 +326,7 @@ if __name__ == "__main__":
                             break
                         except Exception as e:
                             time.sleep(5*60)
+                sys.exit()
                 convert_to_jsonl(
                     os.path.join(dataset["local_base"], "original.json"),
                     os.path.join(dataset["local_base"], "train.jsonl"),
