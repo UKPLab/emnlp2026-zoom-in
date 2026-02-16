@@ -410,6 +410,21 @@ class GRPOScriptArguments(ScriptArguments):
         }
     )
 
+    tool_padding: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "how much padding to add to the bbox. ratio of the original image size"
+        }
+    )
+
+    tool_adaptive_padding_threshold: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "upper bound (in px) for the padding. only relevant if this value is smaller than tool_padding*height or tool_padding*width"
+                    "special values: None -> 600 px, -1 -> None"
+        }
+    )
+
     iou_target_zero: Optional[float] = field(
         default=None,
         metadata={
@@ -555,6 +570,11 @@ def main(script_args, training_args, model_args):
     tool_args = TOOL_CONFIGS["no_tool"] if script_args.tool_config is None else [TOOL_CONFIGS[tool_config] for tool_config in script_args.tool_config.split(",")]
 
     if script_args.tool_config != "no_tool":
+        adaptive_padding_threshold = script_args.tool_adaptive_padding_threshold
+        if adaptive_padding_threshold is None:
+            adaptive_padding_threshold = 600
+        if adaptive_padding_threshold < 0:
+            adaptive_padding_threshold = None
         tools = [Tool(name=tool_arg["tool_name"],
                      template_name=tool_arg["tool_template"],
                      json_customization=tool_arg["tool_json_customization"],
@@ -565,7 +585,10 @@ def main(script_args, training_args, model_args):
 
                      tool_hparams={"max_pixels": script_args.max_pixels,
                                    "min_pixels": script_args.min_pixels,
-                                   "bbox_type": script_args.tool_bbox_type})
+                                   "bbox_type": script_args.tool_bbox_type,
+                                   "padding": (script_args.tool_padding,script_args.tool_padding),
+                                   "adaptive_padding_threshold": adaptive_padding_threshold
+                                   })
                  for tool_arg in tool_args]
     else:
         tools = None

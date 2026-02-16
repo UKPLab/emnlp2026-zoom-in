@@ -269,38 +269,38 @@ if __name__ == "__main__":
 
 
     runs = [
+
         {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_conditional_constant_tool_0p025.json",
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_conditional_constant_tool_0p05.json",
             "shell_number": 1,
-            "path": "",
-            "state": "running"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_30_100_17p5_first_20_mean.json",
-            "shell_number": 2,
-            "path": "",
-            "state": "running"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_continue_pr.json",
-            "shell_number": 3,
-            "path": "",
-            "state": "crashed"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_conditional_constant_tool_1p0.json",
-            "shell_number": 3,
             "path": "",
             "state": "to_be_launched"
         },
+
+
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_conditional_constant_tool_1p0.json",
+            "shell_number": 2,
+            "path": "",
+            "state": "wait"
+        },
+
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_padding_0p05.json",
+            "shell_number": 3,
+            "path": "",
+            "state": "wait"
+        },
+
+
 
         
     ]
 
     for run in runs:
         if run["state"] == "to_be_launched":
-            vllm_screen_name = f"{run['shell_number']}_auto_vllm"
-            train_screen_name = f"{run['shell_number']}_auto_run"
+            vllm_screen_name = f"{run['shell_number']}_auto_vllm_2"
+            train_screen_name = f"{run['shell_number']}_auto_run_2"
 
             available_gpus = None #, "2", "3", "4"]
             reuse_vllm = True
