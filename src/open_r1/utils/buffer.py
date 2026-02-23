@@ -1,9 +1,12 @@
+import time
+
 import torch
 import torch.distributed as dist
 import numpy as np
 from .logger import get_logger
 from functools import partial
 from accelerate.utils import is_peft_model, set_seed, gather_object, broadcast_object_list
+from open_r1.utils.debug_utils import serialized_size_mb
 
 # Get logger for this module
 logger = get_logger(__name__)
@@ -240,6 +243,22 @@ class Buffer:
 
         self.global_buffer = [None] * self.max_size * dist.get_world_size() if self.use_global_buffer else None
 
+        self.global_buffer_sync_type = "gloo" if self.cpu_buffer else "nccl"
+        # lazy, wait until main nccl pg is running
+        self.sync_process_group = "undefined"
+
+
+    def ensure_process_group(self):
+        if self.sync_process_group == "undefined":
+            if self.global_buffer_sync_type == "gloo":
+                if dist.is_available() and dist.is_initialized():
+                    self.sync_process_group = dist.new_group(backend="gloo")
+            elif self.global_buffer_sync_type == "nccl":
+                self.sync_process_group = None
+            else:
+                raise ValueError(f"Unknown global buffer sync type: {self.global_buffer_sync_type}")
+
+
     def sync_buffers(self, begin:int, end:int):
         dist.barrier()
 
@@ -255,7 +274,13 @@ class Buffer:
 
         logger.info(f"syncing buffers: begin: '{begin}', end: '{end}'")
         #global_buffer = _gpu_gather_object(self.data[begin:end])
-        global_buffer = gather_object(self.data[begin:end])
+        logger.info(f"replay buffer syncs {serialized_size_mb(self.data[begin:end])} MB of data")
+        # Gather Python objects via Gloo (CPU) to avoid NCCL/GPU staging and OOM.
+        output_objects = [None for _ in range(dist.get_world_size())]
+        self.ensure_process_group()
+        dist.all_gather_object(output_objects, self.data[begin:end], group=self.sync_process_group)
+        global_buffer = [x for y in output_objects for x in y]
+        #global_buffer = gather_object(self.data[begin:end])
 
         logger.info(f"global buffer: {len(global_buffer)}")
         logger.info(f"global buffer first entry: {global_buffer[0]}")
@@ -287,7 +312,11 @@ class Buffer:
 
             self.write_position += 1
         if self.use_global_buffer:
+            dist.barrier()
+            before_sync  = time.time()
             self.sync_buffers(old_write_position, self.write_position)
+            after_sync = time.time()
+            logger.info(f"Sync time: {after_sync - before_sync:.4f} seconds")
 
     def get(self, batch_size: int, deterministic=False, device=None, padding_side="left"):
         sampling_source = self.data if not self.use_global_buffer else self.global_buffer

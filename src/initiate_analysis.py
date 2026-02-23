@@ -2,6 +2,8 @@ import argparse
 import copy
 import os
 import shutil
+import signal
+from pathlib import Path
 from typing import Union
 
 import pandas as pd
@@ -45,7 +47,7 @@ class ModelParams:
 
 
 class DatasetParams:
-    def __init__(self, dataset_name, **kwargs):
+    def __init__(self, dataset_name, verl_eval=False, **kwargs):
         self.dataset_name = dataset_name
         if self.dataset_name == "pixel_reasoner":
             self.data_files = '/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/pixel_reasoner/RL_data_without_video/train.jsonl'
@@ -73,8 +75,14 @@ class DatasetParams:
                 task = "find_outlier"
             else:
                 task = "single_cell_query"
-            self.data_files = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/muffin_chihuahua/grid/{dataset_name.removeprefix("muffin_chihuahua_")}/{task}.jsonl"
-            self.image_folders = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/muffin_chihuahua/grid/{dataset_name.removeprefix("muffin_chihuahua_")}/images"
+
+            if verl_eval:
+                task += "_verl.json"
+            else:
+                task += ".json"
+
+            self.data_files = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/muffin_chihuahua/grid/{dataset_name.removeprefix('muffin_chihuahua_')}/{task}"
+            self.image_folders = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/muffin_chihuahua/grid/{dataset_name.removeprefix('muffin_chihuahua_')}/images"
         else:
             raise NotImplementedError(f"dataset {dataset_name} not implemented!")
 
@@ -83,13 +91,15 @@ class DatasetParams:
 class EvalParams:
     def __init__(self, batch_size=200, tensor_parallel_size=1, enforce_eager=True, no_vllm=False, dry_run=False,
                  min_pixels=None, max_pixels=None, tool_config_type = "no_tool", image_limit=6, max_tool_uses=5,
-                 bbox_type=None, strict_tool_extraction=False,max_tokens_per_reply=256, **kwargs):
+                 bbox_type=None, strict_tool_extraction=False,max_tokens_per_reply=256,
+                 tool_padding=0.1, tool_adaptive_padding_threshold=600, verl_eval:bool=False,**kwargs):
         # technical
         self.batch_size = batch_size
         self.tensor_parallel_size = tensor_parallel_size
         self.enforce_eager = enforce_eager
         self.no_vllm = no_vllm
         self.dry_run = dry_run
+        self.verl_eval = verl_eval
 
         # outcome relevant
         if max_pixels is None:
@@ -108,6 +118,8 @@ class EvalParams:
 
         self.bbox_type = bbox_type
         self.strict_tool_extraction = strict_tool_extraction
+        self.tool_padding = tool_padding
+        self.tool_adaptive_padding_threshold = tool_adaptive_padding_threshold
         self.max_tokens_per_reply = max_tokens_per_reply
 
 
@@ -127,44 +139,64 @@ class SingleEval:
 
 
     def get_command(self, save_path ):
+
         cmd = []
-        cmd += [
-            'python', '-m', 'open_r1.evaluation.evaluate',
-            '--model_path', f'{self.model_params.full_model_path}',
-            '--model_class', f'{self.model_params.model_class}',
-            '--output_path', f'{save_path}',
+        if not self.eval_params.verl_eval:
+            cmd += [
+                'python', '-m', 'open_r1.evaluation.evaluate',
+                '--model_path', f'{self.model_params.full_model_path}',
+                '--model_class', f'{self.model_params.model_class}',
+                '--output_path', f'{save_path}',
 
-            '--dataset_name', self.dataset_params.dataset_name,
-            # '--prompt_type', f"{prompt_type}",
-            '--data_filepath', self.dataset_params.data_files,
-            '--image_filepath', self.dataset_params.image_folders,
+                '--dataset_name', self.dataset_params.dataset_name,
+                # '--prompt_type', f"{prompt_type}",
+                '--data_filepath', self.dataset_params.data_files,
+                '--image_filepath', self.dataset_params.image_folders,
 
-            '--tensor_parallel_size', f'{self.eval_params.tensor_parallel_size}',
-            '--image_limit', f'{self.eval_params.image_limit}',
-            '--max_tool_uses', f'{self.eval_params.max_tool_uses}',
-            '--batch_size', f'{self.eval_params.batch_size}',
-            '--tool_config', f'{self.eval_params.tool_config_type}',
-            '--max_pixels', f'{self.eval_params.max_pixels}',
-            '--min_pixels', f'{self.eval_params.min_pixels}',
-            '--bbox_type', f'{self.eval_params.bbox_type}',
-            '--strict_tool_extraction', f'{self.eval_params.strict_tool_extraction}',
-            '--max_tokens_per_reply', f'{self.eval_params.max_tokens_per_reply}'
+                '--tensor_parallel_size', f'{self.eval_params.tensor_parallel_size}',
+                '--image_limit', f'{self.eval_params.image_limit}',
+                '--max_tool_uses', f'{self.eval_params.max_tool_uses}',
+                '--batch_size', f'{self.eval_params.batch_size}',
+                '--tool_config', f'{self.eval_params.tool_config_type}',
+                '--max_pixels', f'{self.eval_params.max_pixels}',
+                '--min_pixels', f'{self.eval_params.min_pixels}',
+                '--bbox_type', f'{self.eval_params.bbox_type}',
+                '--strict_tool_extraction', f'{self.eval_params.strict_tool_extraction}',
+                '--tool_padding', f'{self.eval_params.tool_padding}',
+                '--tool_adaptive_padding_threshold', f'{self.eval_params.tool_adaptive_padding_threshold}',
+                '--max_tokens_per_reply', f'{self.eval_params.max_tokens_per_reply}'
 
-        ]
-        if self.eval_params.no_vllm:
-            cmd.append('--no_vllm')
-        if self.eval_params.enforce_eager:
-            cmd.append('--enforce_eager')
+            ]
+            if self.eval_params.no_vllm:
+                cmd.append('--no_vllm')
+            if self.eval_params.enforce_eager:
+                cmd.append('--enforce_eager')
+            working_directory = None
+        else:
+            cmd += [
+                'VLLM_USE_V1=1',
+                'bash', 'run_eval.sh',
+                '--model_path', f'{self.model_params.full_model_path}',
+                '--save_path', f'{save_path}',
+                '--base_image_dir', str(Path(self.dataset_params.image_folders).parent),
+                '--data_path', self.dataset_params.data_files
+                #'--data_path', f'{self.dataset_params.data_files.removesuffix(".jsonl")}_verl.json'
+            ]
+            working_directory = '/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/mini_o3/Mini-o3'
 
-        return cmd
+        return cmd, working_directory
 
     def get_eval_name(self):
-        eval_name = f"{self.model_params.short_name}_{self.model_params.checkpoint}_{self.dataset_params.dataset_name}_{self.eval_params.tool_config_type}_{self.eval_params.max_pixels}_{self.eval_params.min_pixels}"
+        eval_name = f"{self.model_params.short_name}_{self.model_params.checkpoint}_{self.dataset_params.dataset_name}_{self.eval_params.tool_config_type}_{self.eval_params.max_pixels}_{self.eval_params.min_pixels}_{self.eval_params.tool_padding}"
         return eval_name
 
-    def get_save_path(self):
-        save_path = os.path.join(self.model_params.full_output_path, self.model_params.dir_suffix,
-                                 f"dataset_{self.dataset_params.dataset_name}_prompt_{self.eval_params.tool_config_type}_max_pixels_{self.eval_params.max_pixels}_min_pixels_{self.eval_params.min_pixels}")
+    def get_save_path(self, backward_comp_mode=False):
+        if backward_comp_mode:
+            save_path = os.path.join(self.model_params.full_output_path, self.model_params.dir_suffix,
+                                     f"dataset_{self.dataset_params.dataset_name}_prompt_{self.eval_params.tool_config_type}_max_pixels_{self.eval_params.max_pixels}_min_pixels_{self.eval_params.min_pixels}")
+        else:
+            save_path = os.path.join(self.model_params.full_output_path, self.model_params.dir_suffix,
+                                     f"dataset_{self.dataset_params.dataset_name}_prompt_{self.eval_params.tool_config_type}_max_pixels_{self.eval_params.max_pixels}_min_pixels_{self.eval_params.min_pixels}_padding_{self.eval_params.tool_padding}")
         return save_path
 
 
@@ -195,15 +227,27 @@ class SingleEval:
         os.makedirs(os.path.join(save_path, "tool_calls", "generated_images"), exist_ok=True)
 
         logger.info(f"Evaluating {eval_name}")
-        cmd_list = self.get_command(save_path = save_path)
-        #logger.info(f"cmd list: {cmd_list}")
+        cmd_list, working_directory = self.get_command(save_path = save_path)
+        logger.info(f"cmd list: {cmd_list}")
         cmd = " ".join(cmd_list)
-        #logger.info(f"Running command: {cmd}")
-
+        logger.info(f"Running command: {cmd}")
         with open(os.path.join(save_path, "command.txt"), "w") as f:
             f.write(cmd)
-        process = subprocess.Popen(cmd, shell=True)
-        return_code = process.wait()
+        p = subprocess.Popen(cmd, shell=True, cwd=working_directory)
+
+        try:
+            return p.wait()
+        finally:
+            # If anything is still alive, terminate the whole group.
+            try:
+                os.killpg(p.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                return
+            # Escalate quickly if needed.
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 def unpack_datasets(list_of_datasets: list[Union[str, dict]]) -> tuple[list[str], list[str]]:
     unpacked_list = []
@@ -342,7 +386,13 @@ class Evals:
             save_path = eval.get_save_path()
             print(f"save_path: {save_path}")
 
-            result = get_results(os.path.join(save_path, "full_results.json"), metrics)
+            result = get_results(os.path.join(save_path, "full_results.json"), metrics, is_verl=eval.eval_params.verl_eval)
+
+            if result is None and eval.eval_params.tool_padding==0.1:
+                save_path = eval.get_save_path(backward_comp_mode = True)
+                print(f"trying backward compatible save path: {save_path}")
+                result = get_results(os.path.join(save_path, "full_results.json"), metrics)
+
             if result is not None:
                 result["name"] = eval.get_eval_name()
             else:
@@ -437,6 +487,34 @@ if __name__ == "__main__":
             "evaluate": False,
             "analyze": False
         },
+
+        {
+            "short_name": "mini_o3_original_after_RL",
+            "model_path": "Mini-o3/Mini-o3-7B-v1",
+            "checkpoint": None,
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "output_path": "mini_o3_original_after_RL",
+            "verl_eval": True,
+            "tool_config_type": ["zoom_in_relative"],  # , "no_tool"],
+            "dataset_name": [#"pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+                             # "mme_lite",
+                             # "pixel_reasoner_infovqa",
+                             {"name": "muffin_chihuahua",
+                             "grid_pixels": [1, 2, 4, 8],
+                             "gridsize": [1, 2, 4, 8, 16],
+                             "mode": ["single_cell_query", "find_outlier"]
+                             }
+                             ],
+            "max_pixels": [2000000],
+            "min_pixels": [40000],
+            'bbox_type': ["relative"],
+            'strict_tool_extraction': [True],
+            'tool_padding': ['32_turns'],  # , 0.1],
+            'max_tokens_per_reply': [8192],
+            "evaluate": True,
+            "analyze": False,  # later
+        },
+
         {
             "short_name": "cold",
             "model_path": "Qwen_2p5_7B_tool_pr_data_cold_2_iterations_box_20250725_141909",
@@ -2030,8 +2108,8 @@ if __name__ == "__main__":
             "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_20260120_224520",
             "checkpoint": [382],
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
-            "tool_config_type": ["no_tool", "zoom_in_absolute"],
-            "dataset_name": [#"pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+            "tool_config_type": ["zoom_in_absolute"], #"no_tool",
+            "dataset_name": ["pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
                              "mme_lite", "mme",
                              "pixel_reasoner_infovqa",
                              {"name": "muffin_chihuahua",
@@ -2043,6 +2121,7 @@ if __name__ == "__main__":
             "min_pixels": [500 * 28 * 28],
             'bbox_type': ["absolute"],
             'strict_tool_extraction': [False],
+            'tool_padding': [0.05, 0.0],
             'max_tokens_per_reply': [1024],
             "evaluate": False,
             "analyze": False,  # later
@@ -2151,21 +2230,22 @@ if __name__ == "__main__":
             "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_20260123_184044",
             "checkpoint": [382],
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
-            "tool_config_type": ["no_tool", "zoom_in_absolute"],
-            "dataset_name": [#"pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
-                             #"mme_lite",
-                             #"pixel_reasoner_infovqa",
+            "tool_config_type": ["zoom_in_absolute"], #"no_tool",
+            "dataset_name": ["pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+                             "mme_lite",
+                             "pixel_reasoner_infovqa",
                              {"name": "muffin_chihuahua",
                              "grid_pixels": [1, 2, 4, 8],
                              "gridsize": [1, 2, 4, 8, 16],
-                            "mode": ["single_cell_query", "find_outlier"]}
-                            #"mme"
+                            "mode": ["single_cell_query", "find_outlier"]},
+                            "mme"
                              ],
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [500 * 28 * 28],
             'bbox_type': ["absolute"],
             'strict_tool_extraction': [False],
             'max_tokens_per_reply': [1024],
+            'tool_padding': [0.05, 0.0],
             "evaluate": False,
             "analyze": False,  # later
             "contains_full_chkp": True,
@@ -2490,7 +2570,7 @@ if __name__ == "__main__":
             'strict_tool_extraction': [False],
             'max_tokens_per_reply': [1024],
             "evaluate": False,
-            "analyze": True,  # later
+            "analyze": False,  # later
             "contains_full_chkp": True,
             "run_finished": False
         },
@@ -2500,8 +2580,8 @@ if __name__ == "__main__":
             "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_30_100_17p5_first_20_mean_20260210_123020",
             "checkpoint": [382],
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
-            "tool_config_type": ["zoom_in_absolute", "no_tool"],
-            "dataset_name": ["pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+            "tool_config_type": ["zoom_in_absolute"],#, "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar"#, "hr_bench_4k", "hr_bench_8k",
                              # "mme_lite",
                              # "pixel_reasoner_infovqa",
                              # {"name": "muffin_chihuahua",
@@ -2514,16 +2594,163 @@ if __name__ == "__main__":
             'bbox_type': ["absolute"],
             'strict_tool_extraction': [False],
             'max_tokens_per_reply': [1024],
-            "evaluate": True,
-            "analyze": True,  # later
+            "evaluate": False,
+            "analyze": False,  # later
+            "contains_full_chkp": True,
+            "run_finished": False
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_padding_0p05",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_padding_0p05_20260216_164701",
+            "checkpoint": [382],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["zoom_in_absolute", "no_tool"],
+            "dataset_name": ["mme", "pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+                            "mme_lite",
+                            "pixel_reasoner_infovqa",
+                            {"name": "muffin_chihuahua",
+                            "grid_pixels": [1, 2, 4, 8],
+                            "gridsize": [1, 2, 4, 8, 16],
+                            "mode": ["single_cell_query", "find_outlier"]}
+                            ],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'tool_padding': [0.1, 0.05, 0.0],#, 0.1],
+            'max_tokens_per_reply': [1024],
+            "evaluate": False,
+            "analyze": False,  # later
+            "contains_full_chkp": True,
+            "run_finished": False
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_padding_0p0",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_padding_0p0_20260218_000757",
+            "checkpoint": [382],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["no_tool", "zoom_in_absolute"],  # , "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+                             #"mme_lite",
+                             #"pixel_reasoner_infovqa",
+                             #{"name": "muffin_chihuahua",
+                             # "grid_pixels": [1, 2, 4, 8],
+                             # "gridsize": [1, 2, 4, 8, 16],
+                             # "mode": ["single_cell_query", "find_outlier"]}
+                             ],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'tool_padding': [0.1, 0.05, 0.0],  # , 0.1],
+            'max_tokens_per_reply': [1024],
+            "evaluate": False,
+            "analyze": False,  # later
+            "contains_full_chkp": True,
+            "run_finished": False
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_conditional_constant_tool_1p0",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_conditional_constant_tool_1p0_20260218_001054",
+            "checkpoint": [382],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["no_tool", "zoom_in_absolute"],  # , "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+                             # "mme_lite",
+                             # "pixel_reasoner_infovqa",
+                             # {"name": "muffin_chihuahua",
+                             # "grid_pixels": [1, 2, 4, 8],
+                             # "gridsize": [1, 2, 4, 8, 16],
+                             # "mode": ["single_cell_query", "find_outlier"]}
+                             ],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'tool_padding': [0.1],  # , 0.05, 0.1],  # , 0.1],
+            'max_tokens_per_reply': [1024],
+            "evaluate": False,
+            "analyze": False,  # later
             "contains_full_chkp": True,
             "run_finished": False
         },
 
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_padding_0p05",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_padding_0p05_20260219_234642",
+            "checkpoint": [382],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["no_tool", "zoom_in_absolute"],  # , "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+                             # "mme_lite",
+                             # "pixel_reasoner_infovqa",
+                             # {"name": "muffin_chihuahua",
+                             # "grid_pixels": [1, 2, 4, 8],
+                             # "gridsize": [1, 2, 4, 8, 16],
+                             # "mode": ["single_cell_query", "find_outlier"]}
+                             ],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'tool_padding': [0.05],  # , 0.05, 0.1],  # , 0.1],
+            'max_tokens_per_reply': [1024],
+            "evaluate": False,
+            "analyze": False,  # later
+            "contains_full_chkp": True,
+            "run_finished": False
+        },
 
-
-
-
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_padding_0p0",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_padding_0p0_20260219_234130",
+            "checkpoint": [382],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["no_tool", "zoom_in_absolute"],  # , "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+                             # "mme_lite",
+                             # "pixel_reasoner_infovqa",
+                             # {"name": "muffin_chihuahua",
+                             # "grid_pixels": [1, 2, 4, 8],
+                             # "gridsize": [1, 2, 4, 8, 16],
+                             # "mode": ["single_cell_query", "find_outlier"]}
+                             ],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'tool_padding': [0.0],  # , 0.05, 0.1],  # , 0.1],
+            'max_tokens_per_reply': [1024],
+            "evaluate": False,
+            "analyze": False,  # later
+            "contains_full_chkp": True,
+            "run_finished": False
+        },
+        {
+            "short_name": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_continue_pr",
+            "model_path": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_continue_pr_20260218_002110",
+            "checkpoint": [554],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["no_tool", "zoom_in_absolute"],  # , "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+                             # "mme_lite",
+                             # "pixel_reasoner_infovqa",
+                             # {"name": "muffin_chihuahua",
+                             # "grid_pixels": [1, 2, 4, 8],
+                             # "gridsize": [1, 2, 4, 8, 16],
+                             # "mode": ["single_cell_query", "find_outlier"]}
+                             ],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'tool_padding': [0.1],  # , 0.05, 0.1],  # , 0.1],
+            'max_tokens_per_reply': [1024],
+            "evaluate": False,
+            "analyze": True,  # later
+            "contains_full_chkp": True,
+            "run_finished": False
+        },
 
     ]
 
@@ -2554,11 +2781,11 @@ if __name__ == "__main__":
 
         PMI_analysis = False
     else:
-        do_eval = True
+        do_eval = False
         batch_eval = True
         exist_ok = True
 
-        do_analysis = False
+        do_analysis = True
         batch_analyze = True
 
         do_metric_comparison = False
@@ -2635,21 +2862,10 @@ if __name__ == "__main__":
             # "median_image_size",
             # "accuracy_if_tool_used",
             # "accuracy_if_tool_not_used",
-            "tool_success_rate",
-            {"metric_name": "string_matching", "metric_short_name": "ANLS",
-             "match_type": "levenshtein_similarity", "preprocess": "lowercase", "cutoff": 0.5},
+            #"tool_success_rate",
+
             #"ious"
         ]
-
-
-        # "pixel_reasoner_vstar",
-        # "pixel_reasoner_infovqa"
-        # "hr_bench_4k",
-        # "mme_lite"
-        #{"name": "muffin_chihuahua",
-      #"grid_pixels": [1, 2, 4, 8],
-      #"gridsize": [1, 2, 4, 8, 16],
-      #"mode": ["single_cell_query", "find_outlier"]}
 
         datasets_for_analysis = [#{"name": "muffin_chihuahua",
                                  # "grid_pixels": [1,
@@ -2672,7 +2888,7 @@ if __name__ == "__main__":
 
         do_export = True
         metrics_to_keep_for_export = ["accuracy",
-                                    "ANLS",
+                                    #"ANLS",
                                     "avg_pixel_reasoning",
                                     "zoom_in_fraction_median",
                                     "ious"
@@ -2682,6 +2898,11 @@ if __name__ == "__main__":
         dfs_dict_for_export = {}
         pd.set_option('display.max_columns', 10)
         for dataset, short_name in zip(datasets_for_analysis, short_names):
+            if dataset == "pixel_reasoner_infovqa":
+                metrics.append({"metric_name": "string_matching", "metric_short_name": "ANLS",
+            "match_type": "levenshtein_similarity", "preprocess": "lowercase", "cutoff": 0.5})
+            else:
+                metrics = [m for m in metrics if not isinstance(m, dict)]
             for tool_config_type in [
                 "no_tool",
                 #"PR_crop_image_normalized,select_frames"
@@ -2700,23 +2921,21 @@ if __name__ == "__main__":
                                                                 #'max_tokens_per_reply': 256
                                                             }
                                                   )
+                #print(df.head())
                 metrics_to_drop = [m for m in metrics if not (m in metrics_to_keep_for_export or isinstance(m, dict))]
                 metrics_to_drop.append("name")
                 move_to_front = None
                 if dataset == "pixel_reasoner_infovqa":
                     metrics_to_drop.append("accuracy")
                     move_to_front = "ANLS"
-                else:
-                    metrics_to_drop.append("ANLS")
 
                 #if not dataset.startswith("muffin"):
                     #metrics_to_drop.append("ious")
 
                 if tool_config_type == "no_tool":
-                    metrics_to_drop.append("avg_pixel_reasoning")
-                    metrics_to_drop.append("pixel_reasoning_distr")
-                    metrics_to_drop.append("zoom_in_fraction_median")
-                    #metrics_to_drop.append("ious")
+                    for m in ["avg_pixel_reasoning", "pixel_reasoning_distr", "zoom_in_fraction_median", "ious"]:
+                        if m in metrics:
+                            metrics_to_drop.append(m)
 
                 metrics_to_drop = list(set(metrics_to_drop))
                 print(f"metrics_to_drop: {metrics_to_drop}")

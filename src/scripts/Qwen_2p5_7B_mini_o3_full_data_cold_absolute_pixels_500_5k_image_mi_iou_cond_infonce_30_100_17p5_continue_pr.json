@@ -65,7 +65,7 @@
     "strict_tool_extraction": true,
     "global_buffer": true,
     "save_strategy": "epoch",
-    "save_only_model": false,
+    "save_only_model": true,
     "vllm_server_timeout": 600.0,
     "shuffle_dataset": true
   },

@@ -32,15 +32,17 @@ Dry-run mode prints what would happen without modifying anything.
 from __future__ import annotations
 
 import argparse
+import datetime
 import os
 import posixpath
 import shutil
 import stat
 import sys
 from dataclasses import dataclass
+from functools import partial
 from getpass import getpass
 from pathlib import Path
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, Optional, Tuple, Callable, Union
 
 # Optional dependency for remote ops:
 #   pip install paramiko
@@ -69,6 +71,7 @@ class Options:
     remote_user: Optional[str]
     remote_password: Optional[str]
     remote_base_dir: Optional[str]
+    ignore_dirs: Optional[Union[list[str], datetime.date]]
 
     enable_delete_tool_calls: bool
 
@@ -361,8 +364,23 @@ def parse_args() -> Options:
     p.add_argument("--remote-user", default="helm",help="Remote username for SSH")
     p.add_argument("--remote-password", default="1980EintrachtFrankfurtOle\\", help="Remote password for SSH")
     p.add_argument("--remote-base-dir", default="/mnt/beegfs/work/helm/42_data_dump/focusreason/runs", help="Remote base directory to copy into / compare against")
+    p.add_argument("--ignore-dirs", default=None, help="How to choose which dirs to ignore")
+
+
+
 
     args = p.parse_args()
+
+    ignore_dirs = []
+    if args.ignore_dirs == "custom":
+        ignore_dirs = ["Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_continue_pr_20260216_164341",
+                       "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_conditional_constant_tool_1p0_20260216_164025",
+                       "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_padding_0p05_20260216_164701"]
+    elif args.ignore_dirs.startswith("after:"):
+        ignore_dirs = datetime.datetime.strptime(args.ignore_dirs.split(":")[1], "%Y%m%d").date()
+
+
+    print(f"ignore dirs: {ignore_dirs}")
 
     return Options(
         parent=Path(args.parent),
@@ -377,6 +395,7 @@ def parse_args() -> Options:
         remote_user=args.remote_user,
         remote_password=args.remote_password,
         remote_base_dir=args.remote_base_dir,
+        ignore_dirs=ignore_dirs,
 
         enable_delete_tool_calls=args.delete_tool_calls,
     )
@@ -397,13 +416,38 @@ def validate_remote_args(opts: Options) -> None:
     if missing:
         raise ValueError(f"Missing remote options required for remote actions: {', '.join(missing)}")
 
+def loop_action(opts: Options, action:Callable):
+    exp_dirs = list_immediate_subdirs(opts.parent)
+    do_print(opts, f"Found {len(exp_dirs)} experiment dirs under {opts.parent}")
+
+    for exp_dir in exp_dirs:
+        print(f"exp dir name: {exp_dir.name}")
+
+        if isinstance(opts.ignore_dirs, list):
+            if exp_dir.name in opts.ignore_dirs:
+                print(f"ignoring {exp_dir.name}")
+                continue
+        elif isinstance(opts.ignore_dirs, datetime.date):
+            try:
+                runtime = datetime.datetime.strptime(exp_dir.name.split("_")[-2], "%Y%m%d").date()
+
+                if runtime > opts.ignore_dirs:
+                    print(f"ignoring {exp_dir.name}")
+                    continue
+            except ValueError:
+                print(f"cannot parse date from {exp_dir.name}")
+
+        # if exp_dir.name in opts.ignore_dirs:
+        # 1) delete-empty-exp (deletes whole exp dir) – do this first to avoid doing work on dirs to be deleted
+
+        # If we delete it, skip further actions for that exp_dir
+
+        action(opts=opts, exp_dir=exp_dir)
 
 def main() -> int:
     opts = parse_args()
     assert_parent_sanity(opts.parent)
     validate_remote_args(opts)
-
-
 
     remote: Optional[RemoteOps] = None
     try:
@@ -413,39 +457,19 @@ def main() -> int:
             remote = RemoteOps(opts.remote_host, opts.remote_port, opts.remote_user, password)
 
         if opts.enable_delete_empty_exp:
-            exp_dirs = list_immediate_subdirs(opts.parent)
-            do_print(opts, f"Found {len(exp_dirs)} experiment dirs under {opts.parent}")
-            for exp_dir in exp_dirs:
-            # 1) delete-empty-exp (deletes whole exp dir) – do this first to avoid doing work on dirs to be deleted
-
-                # If we delete it, skip further actions for that exp_dir
-                chkp = checkpoint_subdirs(exp_dir)
-                if len(chkp) == 0:
-                    action_delete_empty_exp(opts, exp_dir)
-
+            loop_action(opts, action_delete_empty_exp)
 
         # 2) reduce
         if opts.enable_reduce:
-            exp_dirs = list_immediate_subdirs(opts.parent)
-            do_print(opts, f"Found {len(exp_dirs)} experiment dirs under {opts.parent}")
-            for exp_dir in exp_dirs:
-                action_reduce(opts, exp_dir)
-
+            loop_action(opts, action_reduce)
 
         # 3) move
         if opts.enable_move and remote is not None:
-            exp_dirs = list_immediate_subdirs(opts.parent)
-            do_print(opts, f"Found {len(exp_dirs)} experiment dirs under {opts.parent}")
-            for exp_dir in exp_dirs:
-                action_move(opts, remote, exp_dir)
+            loop_action(opts, partial(action_move, remote=remote))
 
         # 4) delete-tool-calls (after move is often what people want)
         if opts.enable_delete_tool_calls and remote is not None:
-            exp_dirs = list_immediate_subdirs(opts.parent)
-            do_print(opts, f"Found {len(exp_dirs)} experiment dirs under {opts.parent}")
-            for exp_dir in exp_dirs:
-                print(f"start with {exp_dir}")
-                action_delete_tool_calls(opts, remote, exp_dir)
+            loop_action(opts, partial(action_delete_tool_calls, remote=remote))
 
         return 0
     finally:

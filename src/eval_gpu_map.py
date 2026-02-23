@@ -6,17 +6,22 @@ if __name__ == '__main__':
     mapping_list = [
 
         {
-            "model_path":"Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_90_17p5_20260128_155702",
-            "gpu": 0
+            "model_path":"Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_padding_0p05_20260219_234642",
+            "gpu": 1
         },
-        #{
-        #    "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_per_seq_20260128_173341",
-        #    "gpu": 1
-        #},
-        #{
-        #    "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_no_tanh_20260128_142853",
-        #    "gpu": 2
-        #},
+
+        {
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_padding_0p0_20260219_234130",
+            "gpu": 2
+        },
+
+        {
+            "model_path": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_continue_pr_20260218_002110",
+            "gpu": 3
+        },
+
+
+
 
     ]
 

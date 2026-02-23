@@ -30,7 +30,7 @@ def get_diff(results_file: str, model_path:str, fixed_params:dict):
     with open(results_file, "r") as f:
         results = json.load(f)
 
-    print(f"accuracy: {results["accuracy"]}")
+    print(f'accuracy: {results["accuracy"]}')
     return
 
     processor_init_kwargs = {"min_pixels": fixed_params["min_pixels"] if "min_pixels" in fixed_params else None,
@@ -177,7 +177,7 @@ def get_sequence(results: dict, idx:int, fixed_params:dict):
     if fixed_params["tool_config_type"] == "PR_zoom_in_old":
         tool_call = f"\nHere is the cropped image (Image Size: {width}x{height}):<|vision_start|><|image_pad|><|vision_end|>"
     else:
-        raise ValueError(f"tool_config_type= {fixed_params["tool_config_type"]} is not supported")
+        raise ValueError(f"tool_config_type= {fixed_params['tool_config_type']} is not supported")
 
     text = query+first_model_answer+intermediate_1+tool_call+intermediate_2+second_model_answer
     images = [Image.open(image_paths[0]), img_2]

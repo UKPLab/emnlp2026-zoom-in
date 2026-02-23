@@ -523,7 +523,10 @@ if __name__ == "__main__":
     parser.add_argument('--min_pixels', type=int, default=None, help='Minimum number of pixels per image')
     parser.add_argument('--bbox_type', type=str, default=None, help='type of bbox coords to accept. absolute or relative')
     parser.add_argument('--strict_tool_extraction', type=bool, default=None, help='whether tool extraction is strict or not')
+    parser.add_argument('--tool_padding', type=float, default=0.1, help='ratio how much the tool bbox should be increased')
+    parser.add_argument('--tool_adaptive_padding_threshold', type=int, default=None, help='upper bound (in px) of tool use padding')
     parser.add_argument('--max_tokens_per_reply', type=int, default=256, help='Maximum number of tokens per reply')
+
 
     args = parser.parse_args()
 
@@ -546,8 +549,18 @@ if __name__ == "__main__":
         args.prompt_type = tool_configs[0]["prompt_type"]
 
     for tool_config in tool_configs:
+
+        adaptive_padding_threshold = args.tool_adaptive_padding_threshold
+        if adaptive_padding_threshold is None:
+            adaptive_padding_threshold = 600
+        if adaptive_padding_threshold < 0:
+            adaptive_padding_threshold = None
+
         tool_config["tool_hparams"] = {"max_pixels": args.max_pixels, "min_pixels": args.min_pixels,
-                                       "bbox_type": args.bbox_type}
+                                       "bbox_type": args.bbox_type,
+                                       "padding": (args.tool_padding, args.tool_padding),
+                                       "adaptive_padding_threshold": adaptive_padding_threshold
+                                       }
 
     mm_processor_kwargs = {}
     if args.max_pixels is not None:

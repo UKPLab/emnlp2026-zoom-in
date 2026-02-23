@@ -12,7 +12,7 @@ from scipy.stats import pearsonr
 
 logger = get_logger(__name__)
 
-def get_results(path:str, metrics: list[str]):
+def get_results(path:str, metrics: list[str], is_verl=False):
     try:
         data = json.load(open(path, "r"))
     except FileNotFoundError:
@@ -32,7 +32,7 @@ def get_results(path:str, metrics: list[str]):
                 result[metric] = np.mean(np.array(data["tool_use"]))
             if metric == "pixel_reasoning_distr":
                 distr = []
-                for i in range(7):
+                for i in range(32):
                     distr.append(np.mean(np.array(data["tool_use"]) == i).round(4)*100)
                 result[metric] = distr
             if metric == "avg_image_size":
@@ -57,6 +57,12 @@ def get_results(path:str, metrics: list[str]):
                 image_fractions = np.array([(sample[1][0] * sample[1][1])/(sample[0][0] * sample[0][1]) for idx, sample in enumerate(data["image_sizes"]) if len(sample) > 1])
                 result[metric] = np.median(image_fractions)
             if metric == "ious":
+                if is_verl:
+                    last = [sample[-1] for sample in data["ious"] if len(sample) > 0]
+                    result[metric] = np.mean(np.array(last)).round(4).item()*100
+                else:
+                    result[metric] = np.mean(np.array(data["ious"][0])).round(4).item() * 100 if len(data["ious"]) > 0 else 0
+            if metric == "iou_distr":
                 distr = []
                 for i in range(len(data["ious"])):
                     distr.append(np.mean(np.array(data["ious"][i])).round(4).item()*100)

@@ -49,6 +49,8 @@
     "epsilon": 0.2,
     "tool_config": "zoom_in_absolute",
     "tool_bbox_type": "absolute",
+    "tool_padding": 0.0,
+    "tool_adaptive_padding_threshold": -1,
     "strict_tool_extraction": true,
     "global_buffer": true,
     "save_strategy": "epoch",

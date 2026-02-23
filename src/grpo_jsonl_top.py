@@ -411,7 +411,7 @@ class GRPOScriptArguments(ScriptArguments):
     )
 
     tool_padding: Optional[float] = field(
-        default=None,
+        default=0.1,
         metadata={
             "help": "how much padding to add to the bbox. ratio of the original image size"
         }

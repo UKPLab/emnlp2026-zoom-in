@@ -10,22 +10,24 @@ path_prefix = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/ru
 "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_random_sum_20260102_183643" # 2247
 "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_long_curr_sum_20260102_183159" # 2247
 "Qwen_2p5_7B_pr_data_warm_absolute_pixels_500_5k_image_mi_iou_random_sum_20260102_183643" # 1337
+"Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_no_tanh_20260128_142853" # 1337
+"Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_30_100_17p5_first_20_mean_20260210_123020" # 1337
 
-run_path = "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_no_tanh_20260128_142853"
-
+run_path = "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_continue_pr_20260218_002110" # 1939
 filepath = os.path.join(path_prefix, run_path, "run_log.txt")
 with open(filepath) as f:
     lines = f.readlines()
-
-
 
 search_string = f"model_generations for reward calculation:"
 
 too_longs = []
 print(len(lines))
 matches = 0.0
-total_matches = 1337
-targets = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 0.9])
+total_matches = 1939
+#targets = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 0.9])
+#targets += 0.01
+targets = np.array([0.7, 0.73, 0.76, 0.8, 0.83, 0.86, 0.9, 0.93, 0.96])
+
 for line in lines:
     if search_string in line:
         matches += 1.0
@@ -37,7 +39,7 @@ for line in lines:
         #print("found!")
         #print(line)
         try:
-            print(line)
+            #print(line)
             splitted = re.split(r"(?<!\\)'", line)
             second_gen = splitted[1].split("</tool_call>")[-1]
             print(second_gen)
