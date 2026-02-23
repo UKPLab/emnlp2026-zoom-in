@@ -442,9 +442,7 @@ def evaluation_process(model_path, model_class, output_path:str, tensor_parallel
                               template_name=tool_arg["tool_template"],
                               json_customization=tool_arg["tool_json_customization"],
 
-                              message=Message(tool_arg["tool_message_image_pos"],
-                                         tool_arg["tool_message_text_message"],
-                                         tool_arg["tool_message_text_fillers"]),
+                              message=Message(tool_arg["tool_message"]),
 
                               tool_hparams=tool_arg["tool_hparams"]))
 

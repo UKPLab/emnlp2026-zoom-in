@@ -579,9 +579,7 @@ def main(script_args, training_args, model_args):
                      template_name=tool_arg["tool_template"],
                      json_customization=tool_arg["tool_json_customization"],
 
-                     message=Message(tool_arg["tool_message_image_pos"],
-                             tool_arg["tool_message_text_message"],
-                             tool_arg["tool_message_text_fillers"]),
+                     message=Message(tool_arg["tool_message"]),
 
                      tool_hparams={"max_pixels": script_args.max_pixels,
                                    "min_pixels": script_args.min_pixels,

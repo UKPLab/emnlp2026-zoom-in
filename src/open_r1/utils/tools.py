@@ -23,10 +23,12 @@ TOOL_CONFIGS = {
                                             "function,parameters,properties,bbox_2d,items,type": "number",
                                             "function,parameters,properties,target_image,type": "number",},
 
-                "tool_message_image_pos": "last",
-                "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
-                "tool_message_text_fillers": ["width", "height"],
-                "prompt_type": "pr_adapted"
+                "tool_message": [{"text": "\nHere is the cropped image (Image Size: <width>x<height>):", "fillers": ["width", "height"]},
+                                 {"text": None},
+                                 ],
+                "prompt_type": "pr_adapted",
+                
+
             },
             "PR_zoom_in_with_hint":
             {"tool_name": "zoom_in",
@@ -37,9 +39,9 @@ TOOL_CONFIGS = {
                  "function,parameters,properties,bbox_2d,items,type": "number",
                  "function,parameters,properties,target_image,type": "number", },
 
-             "tool_message_image_pos": "last",
-             "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
-             "tool_message_text_fillers": ["width", "height"],
+             "tool_message": [{"text": "\nHere is the cropped image (Image Size: <width>x<height>):", "fillers": ["width", "height"]},
+                                 {"text": None},
+                                 ],
              "prompt_type": "pr_original"
              },
             "zoom_in_absolute":
@@ -48,9 +50,34 @@ TOOL_CONFIGS = {
                 "tool_json_customization": {"function,description": "Zoom in on the image based on the bounding box coordinates.",
                                             "function,parameters,properties,bbox_2d,description": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image.",
                                             "function,parameters,properties,bbox_2d,items,type": "integer"},
-                "tool_message_image_pos": "last",
-                "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
-                "tool_message_text_fillers": ["width", "height"],
+                "tool_message": [{"text": "\nHere is the cropped image (Image Size: <width>x<height>):", "fillers": ["width", "height"]},
+                                 {"text": None},
+                                 ],
+                "prompt_type": "pr_adapted"
+            },
+            "zoom_in_absolute_describe":
+            {   "tool_name": "zoom_in",
+                "tool_template": "zoom_in",
+                "tool_json_customization": {"function,description": "Zoom in on the image based on the bounding box coordinates.",
+                                            "function,parameters,properties,bbox_2d,description": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image.",
+                                            "function,parameters,properties,bbox_2d,items,type": "integer"},
+                "tool_message": [{"text": "\nHere is the cropped image (Image Size: <width>x<height>):", "fillers": ["width", "height"]},
+                                 {"text": None},
+                                 {"text": "\nBefore continuing to reason, please briefly describe the new image."},
+                                 ],
+                "prompt_type": "pr_adapted"
+            },
+            "zoom_in_absolute_roadmap":
+            {   "tool_name": "zoom_in",
+                "tool_template": "zoom_in",
+                "tool_json_customization": {"function,description": "Zoom in on the image based on the bounding box coordinates.",
+                                            "function,parameters,properties,bbox_2d,description": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image.",
+                                            "function,parameters,properties,bbox_2d,items,type": "integer"},
+                "tool_message": [{"text": "\nHere is the cropped image (Image Size: <width>x<height>):", "fillers": ["width", "height"]},
+                                 {"text": None},
+                                 {"text": "\nFirst, describe the new image briefly. Then continue your reasoning to answer the initial question."
+                                          "Finally, decide to use the tool again or put your answer within \\boxed{}."},
+                                 ],
                 "prompt_type": "pr_adapted"
             },
             "zoom_in_relative":
@@ -59,27 +86,26 @@ TOOL_CONFIGS = {
                 "tool_json_customization": {"function,description": "Zoom in on the image based on the bounding box coordinates.",
                                             "function,parameters,properties,bbox_2d,description": "normalized coordinates for bounding box of the region you want to zoom in. Values should be within [0.0,1.0].",
                                             "function,parameters,properties,bbox_2d,items,type": "float"},
-                "tool_message_image_pos": "last",
-                "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
-                "tool_message_text_fillers": ["width", "height"],
+                "tool_message": [{"text": "\nHere is the cropped image (Image Size: <width>x<height>):", "fillers": ["width", "height"]},
+                                 {"text": None},
+                                 ],
                 "prompt_type": "pr_adapted"
             },
             "no_tool": {
                 "tool_name": "",
                 "tool_template": "",
                 "tool_json_customization": {},
-                "tool_message_image_pos": "",
-                "tool_message_text_message": "",
-                "tool_message_text_fillers": [],
+                "tool_message": [],
                 "prompt_type": "no_tool"
             },
             "select_frames": {
                 "tool_name": "select_frames",
                 "tool_template": "select_frames",
                 "tool_json_customization": {},
-                "tool_message_image_pos": "last",
-                "tool_message_text_message": "\nHere are the selected frames (Frame Size: <width>x<height>, Numbered <start> to <end>):",
-                "tool_message_text_fillers": ["width", "height", "start", "end"],
+                "tool_message": [{"text": "\nHere are the selected frames (Frame Size: <width>x<height>, Numbered <start> to <end>):",
+                                  "fillers": ["width", "height", "start", "end"]},
+                                 {"text": None},
+                                 ],
                 "prompt_type": "pr_original"
             },
 
@@ -91,9 +117,9 @@ TOOL_CONFIGS = {
                                             "function,parameters,properties,bbox_2d,items,type": "number",
                                             "function,parameters,properties,target_image,type": "number",
                                             "function,name": "crop_image_normalized"},
-                "tool_message_image_pos": "last",
-                "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
-                "tool_message_text_fillers": ["width", "height"],
+                "tool_message": [{"text": "\nHere is the cropped image (Image Size: <width>x<height>):", "fillers": ["width", "height"]},
+                                 {"text": None},
+                                 ],
                 "prompt_type": "pr_original"
 
             },
@@ -105,9 +131,9 @@ TOOL_CONFIGS = {
                                             "function,parameters,properties,bbox_2d,items,type": "number",
                                             "function,parameters,properties,target_image,type": "number",
                                             "function,name": "crop_image_normalized"},
-                "tool_message_image_pos": "last",
-                "tool_message_text_message": "\nHere is the cropped image (Image Size: <width>x<height>):",
-                "tool_message_text_fillers": ["width", "height"],
+                "tool_message": [{"text": "\nHere is the cropped image (Image Size: <width>x<height>):", "fillers": ["width", "height"]},
+                                 {"text": None},
+                                 ],
                 "prompt_type": "pr_adapted"
 
             }
@@ -267,30 +293,33 @@ TOOL_START = "<tool_call>"
 TOOL_END = "</tool_call>"
 
 class Message:
-    def __init__(self, image_position:str, text_message:str, text_fillers: list):
-        self.image_position = image_position
-        self.text_message = text_message
-        self.text_fillers = text_fillers
-
-    def fill_message(self, params:dict):
-        filled_message = self.text_message
-        for filler in self.text_fillers:
+    def __init__(self, message: list):
+        self.message = message
+    
+    @classmethod
+    def fill_message(cls, msg: dict, params:dict):
+        filled_message = msg["text"]
+        for filler in msg["fillers"]:
             if filler in params:
                 filled_message = filled_message.replace(f"<{filler}>", str(params[filler]))
             else:
                 raise ValueError(f"Missing filler: {filler}, we are only given {params}")
         return filled_message
 
-    def get_content(self, params):
+    def get_content(self, params: list[dict[str, str]]):
         content = []
-        if self.image_position == "first":
-            content.append({"text": None, "type": "image"})
-            content.append({'text': self.fill_message(params), 'type': 'text'})
-        elif self.image_position == "last":
-            content.append({'text': self.fill_message(params), 'type': 'text'})
-            content.append({"text": None, "type": "image"})
-        else:
-            raise ValueError(f"Invalid image position: {self.image_position}. Should be 'first' or 'last'")
+        idx = 0
+        for item in self.message:
+            if "text" not in item:
+                pass
+            elif item['text'] is None:
+                content.append({"text": None, "type": "image"})
+            else:
+                if "fillers" not in item or item["fillers"] is None or len(item["fillers"]) == 0:
+                    content.append({'text': item["text"], 'type': 'text'})
+                else:
+                    content.append({'text': self.fill_message(item, params[idx]), 'type': 'text'})
+                    idx += 1
         return content
 
 
@@ -305,7 +334,7 @@ class Tool:
         for path_to_key, value in self.json_customization.items():
             keys = path_to_key.split(",")
             #print(f"in Tool: keys: {keys}")
-            #print(f"in Tool: {self.tool_dict}")
+            #print(f"in Tool: {cls.tool_dict}")
 
             last_container = reduce(operator.getitem, keys[:-1], self.tool_dict)
             last_container[keys[-1]] = value
@@ -373,6 +402,8 @@ class Tool:
         message_args = tool_args.copy()
         message_args["width"] = input_width
         message_args["height"] = input_height
+
+        message_args = [message_args]
 
         if isinstance(new_image, str):
             new_image_path = new_image
