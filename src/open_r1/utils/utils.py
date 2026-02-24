@@ -444,6 +444,8 @@ def generate_bbox_2d_new_close_iou_targeted(
     bbox_type: Optional[str] = None,
     adaptive_padding_threshold: Optional[float] = 600.0,
     tol: float = 0.1,
+    other_bboxes: Optional[list[BBoxIn]] = None,
+    other_bbox_threshold: Optional[float] = 0.05,
     max_tries: int = 5000,
     min_crop_size: int = 28,
     seed: Optional[int] = None,
@@ -460,6 +462,8 @@ def generate_bbox_2d_new_close_iou_targeted(
 
     Speed: Typically tens/hundreds of proposals; robust across target_iou in [0,1] with tol≈0.05–0.1.
     """
+
+
     if not ((0.0 <= target_iou <= 1.0) or target_iou == -1.0):
         raise ValueError("target_iou must be in [0,1] or -1.")
     if tol < 0.0:
@@ -492,6 +496,21 @@ def generate_bbox_2d_new_close_iou_targeted(
         input_h=float(input_h),
     )
     ref_pix = _pixel_box_from_norm(ref_final_norm, img_w, img_h)
+
+    other_bboxes_boxI = []
+    if other_bboxes is not None:
+        for other_bbox in other_bboxes:
+            # Reference final crop box (simulate zoom_in)
+            ref_final_norm_other = _normalized_bbox_like_zoom_in(
+                other_bbox,
+                padding=eff_pad,
+                bbox_type=bbox_type,
+                input_w=float(input_w),
+                input_h=float(input_h),
+            )
+            ref_pix_other = _pixel_box_from_norm(ref_final_norm_other, img_w, img_h)
+            other_bboxes_boxI.append(ref_pix_other)
+
 
     if target_iou == -1.0:
         return ref_pix.x1, ref_pix.y1, ref_pix.x2, ref_pix.y2
@@ -581,11 +600,22 @@ def generate_bbox_2d_new_close_iou_targeted(
                 "cand_final_norm_simulated": cand_sim_final,
             }
 
-        if err <= tol:
-            if return_debug:
-                return bbox_new, best_dbg
-            return bbox_new
 
+        #print(other_bboxes_boxI)
+        too_close_to_previous = False
+        if err <= tol:
+            if other_bboxes is not None and len(other_bboxes) > 0:
+                for other_bbox in other_bboxes_boxI:
+                    print(f"iou to previous: {_iou_i(other_bbox, cand_sim_pix)}")
+                    if _iou_i(other_bbox, cand_sim_pix) > other_bbox_threshold:
+                        too_close_to_previous = True
+            print(f"too close to previous: {too_close_to_previous}")
+            if not too_close_to_previous:
+                print(f"returning bbox")
+                if return_debug:
+                    return bbox_new, best_dbg
+                return bbox_new
+        print(f"next try")
     if best_bbox is None:
         raise RuntimeError("Failed to generate any candidate bbox (unexpected).")
 

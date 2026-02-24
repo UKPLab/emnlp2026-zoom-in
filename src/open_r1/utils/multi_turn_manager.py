@@ -696,7 +696,8 @@ class MultiTurn:
                                   save_path: str = None,
                                   step: int = None,
                                   iou_target: float = None,
-                                  tool_turn_selection: str = None
+                                  tool_turn_selection: str = None,
+                                  negative_bboxes: list[list[tuple]] = None # rows are negatives, cols are rollouts
                                   ):
         """
         alternative_action: "second_model_generation", "double_newline",
@@ -719,6 +720,7 @@ class MultiTurn:
         alternative_mt_manager = copy.deepcopy(self)
         considered_seqs = {}
         changed_idxs = [False for _ in range(self.batch_size)]
+        new_bboxes = []
         for idx in range(self.batch_size):
             conv = self.all_multi_turn[idx]
             image_path = self.get_image_paths(flatten=False)[idx]
@@ -728,11 +730,16 @@ class MultiTurn:
                                                      ground_truth= tokenized_ground_truth[idx] if tokenized_ground_truth is not None else None,
                                                      image_paths = copy.deepcopy(image_path),
                                                      step = step, iou_target = iou_target, save_path = save_path,
-                                                     tool_turn_selection = tool_turn_selection
+                                                     tool_turn_selection = tool_turn_selection,
+                                                     negative_bboxes = [negative[idx] for negative in negative_bboxes if negative[idx] is not None]
                                                      )
             if isinstance(validity, tuple):
+                new_bbox = validity[2]
                 tool_turn = validity[1]
                 validity = validity[0]
+            else:
+                new_bbox = validity["new_bbox"] if validity is not None and "new_bbox" in validity.keys() else None
+            new_bboxes.append(new_bbox)
             logger.info(f"after get alternative sequence for {idx}. Validity: {validity.all_multi_turn if isinstance(validity, MultiTurn) else validity}")
             # sometimes, validity is MultiTurn. but we don't need this anyway rn
             # selected_tool_turn = validity["image_turns"][-1] if validity is not None else None
@@ -764,7 +771,7 @@ class MultiTurn:
 
         if alternative_action == "alternative_tool_call":
             # third one should be a list of turns that got changed
-            return alternative_mt_manager, changed_idxs, None, None
+            return alternative_mt_manager, changed_idxs, None, None, new_bboxes
         else:
             input_ids = [v["short_sequence"] for v in considered_seqs.values()]
 
@@ -777,7 +784,7 @@ class MultiTurn:
                         images_per_conv += len(self.all_multi_turn[conv_id][turn_id].image_paths)
                 images_per_sample.append(images_per_conv)
 
-            return input_ids, positions, images_per_sample, considered_seqs
+            return input_ids, positions, images_per_sample, considered_seqs, new_bboxes
 
     def get_alternative_sequence(self, #conv: list[Turn],
                                  alternative_mt_manager,
@@ -789,7 +796,9 @@ class MultiTurn:
                                  save_path: str = None,
                                  step: int = None,
                                  iou_target: float = None,
-                                 tool_turn_selection: str = None):
+                                 tool_turn_selection: str = None,
+                                 negative_bboxes: list[tuple] = None # every entry is the bbox for a single negative for this rollout
+                                 ):
         """
         alternative_action: "second_model_generation", "double_newline",
                             "double_newline,the,answer,is"
@@ -859,6 +868,8 @@ class MultiTurn:
         answer_position_begin_full = None
         answer_position_end_full = None
 
+        new_bbox = None
+
         # after state
         if alternative_action == "second_model_generation":
             new_conv[tool_turn].token_ids += conv[tool_turn+2].token_ids[:box_idx+2]
@@ -892,10 +903,13 @@ class MultiTurn:
                                                                         iou_target=iou_target,
                                                                         step=step,
                                                                         image_paths=image_paths,
-                                                                        tool=copy.deepcopy(self.tools[0]))
+                                                                        tool=copy.deepcopy(self.tools[0]),
+                                                                        negative_bboxes=negative_bboxes)
             if alternative_tool_execution is None:
                 logger.info(f"no alternative seq possible: alternative_tool_execution failed")
                 return None
+
+            new_bbox = alternative_tool_execution["new_bbox"]
 
             new_tool_call = replace_tool_call(original_tool_call=original_tool_call,
                               new_bbox = alternative_tool_execution["new_bbox"],
@@ -913,7 +927,7 @@ class MultiTurn:
 
 
 
-            return (alternative_mt_manager, tool_turn)
+            return (alternative_mt_manager, tool_turn, new_bbox)
         elif alternative_action == "alternative_tool_call_without_execution":
             if image_paths is None or save_path is None or step is None or iou_target is None:
                 raise ValueError(
@@ -927,7 +941,10 @@ class MultiTurn:
                                                                         step=step,
                                                                         image_paths=image_paths,
                                                                         tool=copy.deepcopy(self.tools[0]),
-                                                                        only_return_new_bbox=True)
+                                                                        only_return_new_bbox=True,
+                                                                        negative_bboxes=negative_bboxes)
+
+            new_bbox = alternative_tool_execution["new_bbox"]
 
             new_tool_call = replace_tool_call(original_tool_call=original_tool_call,
                                               new_bbox=alternative_tool_execution["new_bbox"],
@@ -1047,6 +1064,7 @@ class MultiTurn:
         "short_sequence": alternative_sequence,
         "updated_original_sequence": sequence,
         "image_turns": range(tool_turn+1),
+        "new_bbox": new_bbox,
         "dummy": False}
 
     def check(self, all_multimodal_inputs: list[dict], all_multimodal_token_inputs: list[dict],
@@ -1077,7 +1095,9 @@ class MultiTurn:
             if all_multimodal_inputs[idx]["image_path"] != all_multimodal_token_inputs[idx]["image_path"]:
                 logger.debug(f"image paths are different. got: {all_multimodal_token_inputs[idx]["image_path"]} but ground truth is {all_multimodal_inputs[idx]["image_path"]}")
 
-    def get_alternative_tool_call(self, save_path: str, step:int, tool_call: str, iou_target: float, image_paths:list[str], tool: Tool, only_return_new_bbox:bool=False) -> Optional[dict]:
+    def get_alternative_tool_call(self, save_path: str, step:int, tool_call: str, iou_target: float,
+                                  image_paths:list[str], tool: Tool, only_return_new_bbox:bool=False,
+                                  negative_bboxes: list[tuple] = None) -> Optional[dict]:
         """
         if the tool call fails, returns None
         otherwise, returns a dict with 'prompts' and 'image_paths', ready to be fed into self.add_user_message
@@ -1091,8 +1111,10 @@ class MultiTurn:
 
                 if (tool.name == tool_params["name"] or
                    (tool_params["name"] == "crop_image" and tool.name == "crop_image_normalized")):
-                    tool_call_result = tool.call_tool(tool_params, save_path, generate_and_use_new_bbox={"iou_target": iou_target},
-                                                      only_return_new_bbox=only_return_new_bbox)
+                    tool_call_result = tool.call_tool(tool_params, save_path, generate_and_use_new_bbox={"iou_target": iou_target,
+                                                                                                         "negative_bboxes": negative_bboxes},
+                                                      only_return_new_bbox=only_return_new_bbox,
+                                                      )
                     if only_return_new_bbox:
                         return {"new_bbox": tool_call_result["new_bbox"]}
                     logger.info(f"in get_alternative_tool_call: tool_call_result: {tool_call_result}")

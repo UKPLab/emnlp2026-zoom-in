@@ -318,6 +318,20 @@ class GRPOScriptArguments(ScriptArguments):
         }
     )
 
+    mi_num_negatives: Optional[int] = field(
+        default=1,
+        metadata={
+            "help": "how many negatives to use"
+        }
+    )
+
+    mi_multi_negative_mode: Optional[str] = field(
+        default='strict',
+        metadata={
+            "help": "strict means we enforce that all negatives are not None for a rollout "
+        }
+    )
+
     #mi_short_bridge: Optional[str] = field(
     #    default=None,
     #    metadata={
@@ -687,7 +701,9 @@ def main(script_args, training_args, model_args):
                "custom_advantage_position": script_args.mi_custom_advantage_position,
                "importance_sampling": script_args.mi_importance_sampling,
                "use_info_nce": script_args.mi_use_info_nce,
-                "tool_turn_selection": script_args.mi_tool_turn_selection
+                "tool_turn_selection": script_args.mi_tool_turn_selection,
+                "num_negatives": script_args.mi_num_negatives,
+                "multi_negative_mode": script_args.mi_multi_negative_mode
     }
 
 

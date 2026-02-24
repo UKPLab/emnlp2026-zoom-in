@@ -1271,34 +1271,23 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             # computation here, and use per_token_logps.detach() instead.
             if self.num_iterations > 1:
                 #logger.info("before old_per_token_logps calculation")
-                if use_mi_reward:
-                    logger.info(f"before old per token logp calculation")
-                    old_per_token_logps, old_per_token_entropies = self._get_per_token_logps(model, prompt_ids, prompt_mask,
-                                                  image_grid_thw=multimodal_inputs["image_grid_thw"],
-                                                  pixel_values=multimodal_inputs["pixel_values"],
-                                                  num_images=images_per_sample,
-                                                  batch_size=self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier,
-                                                  disable_dropout=True, return_entropies=True)
+                logger.info(f"in old_per_token_logps: images_per_sample:  {images_per_sample}")
+                old_per_token_logps, old_per_token_entropies = self._get_per_token_logps(model, prompt_ids, prompt_mask,
+                                              image_grid_thw = multimodal_inputs["image_grid_thw"],
+                                              pixel_values = multimodal_inputs["pixel_values"],
+                                              num_images = images_per_sample,
+                                              batch_size = self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier,
+                                              disable_dropout=True, return_entropies=True)
 
-                    if torch.isnan(old_per_token_logps).any():
-                        logger.info(f"old_per_token_logps contains nan! {old_per_token_logps}")
-                        logger.info(f"prompt_ids: {prompt_ids}")
-                        logger.info(f"prompt_mask: {prompt_mask}")
-                        logger.info(f"images: {images}")
-                        sys.exit(1)
-                    logger.info(f"after old per token logp calculation")
+                if torch.isnan(old_per_token_logps).any():
+                    logger.info(f"old_per_token_logps contains nan! {old_per_token_logps}")
+                    logger.info(f"prompt_ids: {prompt_ids}")
+                    logger.info(f"prompt_mask: {prompt_mask}")
+                    logger.info(f"images: {images}")
+                    sys.exit(1)
+                logger.info(f"after old per token logp calculation")
 
-                else:
-                    logger.info(f"in old_per_token_logps: images_per_sample:  {images_per_sample}")
-                    old_per_token_logps, old_per_token_entropies = self._get_per_token_logps(model, prompt_ids, prompt_mask,
-                                                  image_grid_thw = multimodal_inputs["image_grid_thw"],
-                                                  pixel_values = multimodal_inputs["pixel_values"],
-                                                  num_images = images_per_sample,
-                                                  batch_size = self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier,
-                                                  disable_dropout=True, return_entropies=True)
-
-                #logger.info("after old_per_token_logps calculation")
-
+                #logger.info("after old_per_token_logps calculation"
             else:
                 #logger.info(f"set old_per_token_logps to None")
                 old_per_token_logps = None
@@ -1335,311 +1324,352 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             contrasted_area = None
             diff = None
             contrast_diff_list = None
+            negatives_list = None
+            negative_bboxes = None
+            positives_list = None
             stop_using_mi_rewards = False
 
             if use_mi_reward:
+                negatives_list = [[] for _ in range(self.mi_mode["num_negatives"])]
+                negative_bboxes = []
+                positives_list = []
                 if self.iou_target_fn is not None:
                     iou_target = self.iou_target_fn(self.state.global_step / self.state.max_steps)
                     self._metrics["iou_target"].append(iou_target)
                     if iou_target >= 1:
                         stop_using_mi_rewards = True
                 if not stop_using_mi_rewards:
-                    logger.info(f"before get alternative seqs")
-                    input_ids_mi, image_positions_mi, reduced_images_per_sample, considered_seqs = multi_turn_manager.get_alternative_sequences(
-                        alternative_action=self.mi_mode["alternative_action"],
-                        answer=self.mi_mode["answer_type"],
-                        ground_truth=[random.choice(inp["solution"]) for inp in inputs],
-                        save_path=os.path.join(self.save_path, "tool_calls"),
-                        step=self.state.global_step,
-                        iou_target=iou_target,
-                        tool_turn_selection=self.mi_mode["tool_turn_selection"]
-                    )
-                    if self.mi_mode["alternative_action"] == "alternative_tool_call":
-                        alternative_mt_manager = input_ids_mi
-                        #logger.info(f"alternative mt manager: {alternative_mt_manager.all_multi_turn}")
+                    # Collect negatives
+                    # negatives_list has shape (num_negatives, num_rollouts)
+                    for negative_idx in range(self.mi_mode["num_negatives"]):
+                        logger.info(f"before get alternative seqs")
+                        input_ids_mi, image_positions_mi, reduced_images_per_sample, considered_seqs, new_bboxes = multi_turn_manager.get_alternative_sequences(
+                            alternative_action=self.mi_mode["alternative_action"],
+                            answer=self.mi_mode["answer_type"],
+                            ground_truth=[random.choice(inp["solution"]) for inp in inputs],
+                            save_path=os.path.join(self.save_path, "tool_calls"),
+                            step=self.state.global_step,
+                            iou_target=iou_target,
+                            tool_turn_selection=self.mi_mode["tool_turn_selection"],
+                            negative_bboxes=negative_bboxes
+                        )
+                        negative_bboxes.append(new_bboxes)
+                        if self.mi_mode["alternative_action"] == "alternative_tool_call":
+                            alternative_mt_manager = input_ids_mi
+                            #logger.info(f"alternative mt manager: {alternative_mt_manager.all_multi_turn}")
 
-                        changed_idxs = [True if i is not False else False for i in image_positions_mi]
-                        tool_turns = image_positions_mi
-                        logger.info(f"changed_idxs: {changed_idxs}")
-                        local_tools_used = overall_tools_used[process_slice]
-                        logger.info(f"local tools used: {local_tools_used}")
-                        unchanged_but_tool_used = [idx for idx in range(len(local_tools_used)) if changed_idxs[idx] is False and local_tools_used[idx] > 0]
-                        logger.info(f"unchanged_but_tool_used: {unchanged_but_tool_used}")
+                            changed_idxs = [True if i is not False else False for i in image_positions_mi]
+                            tool_turns = image_positions_mi
+                            logger.info(f"changed_idxs: {changed_idxs}")
+                            local_tools_used = overall_tools_used[process_slice]
+                            logger.info(f"local tools used: {local_tools_used}")
+                            unchanged_but_tool_used = [idx for idx in range(len(local_tools_used)) if changed_idxs[idx] is False and local_tools_used[idx] > 0]
+                            logger.info(f"unchanged_but_tool_used: {unchanged_but_tool_used}")
 
-                        pixel_values_mi = alternative_mt_manager.get_multimodal(type="pixel_values")
-                        image_grid_thw_mi = alternative_mt_manager.get_multimodal(type="image_grid_thw")
+                            pixel_values_mi = alternative_mt_manager.get_multimodal(type="pixel_values")
+                            image_grid_thw_mi = alternative_mt_manager.get_multimodal(type="image_grid_thw")
 
-                        input_ids_mi, positions = alternative_mt_manager.get_sequences(type="id", add_assistant_start=False,
-                                                             full_image_pad=True, ignore_finished=False,
-                                                             return_positions=True)
+                            input_ids_mi, positions = alternative_mt_manager.get_sequences(type="id", add_assistant_start=False,
+                                                                 full_image_pad=True, ignore_finished=False,
+                                                                 return_positions=True)
 
-                        considered_seqs = []
-                        for conv_idx in range(len(positions)):
-                            if changed_idxs[conv_idx]:
-                                for turn_idx in range(len(positions[conv_idx])):
-                                    if positions[conv_idx][turn_idx]["turn"] == tool_turns[conv_idx]+2:
-                                        considered_seqs.append({"contrasted_area_short": [positions[conv_idx][turn_idx]["start"],
-                                                                                          positions[conv_idx][turn_idx]["end"]],
-                                                                "contrasted_area":[original_positions[conv_idx][turn_idx]["start"],
-                                                                                   original_positions[conv_idx][turn_idx]["end"]]})
+                            considered_seqs = []
+                            for conv_idx in range(len(positions)):
+                                if changed_idxs[conv_idx]:
+                                    for turn_idx in range(len(positions[conv_idx])):
+                                        if positions[conv_idx][turn_idx]["turn"] == tool_turns[conv_idx]+2:
+                                            considered_seqs.append({"contrasted_area_short": [positions[conv_idx][turn_idx]["start"],
+                                                                                              positions[conv_idx][turn_idx]["end"]],
+                                                                    "contrasted_area":[original_positions[conv_idx][turn_idx]["start"],
+                                                                                       original_positions[conv_idx][turn_idx]["end"]]})
 
-                            else:
-                                considered_seqs.append(None)
-                        logger.info(f"considered_seqs: {considered_seqs}")
+                                else:
+                                    considered_seqs.append(None)
+                            logger.info(f"considered_seqs: {considered_seqs}")
+                        else:
+                            pixel_values_mi = multi_turn_manager.get_multimodal(type="pixel_values",
+                                                                                positions=image_positions_mi)
+                            image_grid_thw_mi = multi_turn_manager.get_multimodal(type="image_grid_thw",
+                                                                                  positions=image_positions_mi)
 
+                        logger.info(f"after get alternative seqs")
 
-                    else:
-                        pixel_values_mi = multi_turn_manager.get_multimodal(type="pixel_values",
-                                                                            positions=image_positions_mi)
-                        image_grid_thw_mi = multi_turn_manager.get_multimodal(type="image_grid_thw",
-                                                                              positions=image_positions_mi)
+                        mask_mi = [[1 for _ in seq] for seq in input_ids_mi]
+                        #logger.info(f"mask_mi before pad: {[len(s) for s in mask_mi]}")
+                        input_ids_mi = pad(input_ids_mi, padding_side='right', padding_value=self.processing_class.pad_token_id)
+                        #logger.info(f"prompt_ids_mi after pad: {[len(s) for s in input_ids_mi]}")
+                        mask_mi = pad(mask_mi, padding_side='right', padding_value=0)
+                        #logger.info(f"prompt_mask_new after pad: {[len(s) for s in mask_mi]}")
 
-                    logger.info(f"after get alternative seqs")
+                        inputs_mi = {"input_ids": torch.tensor(input_ids_mi, dtype=torch.long, device=device),
+                                     "attention_mask": torch.tensor(mask_mi, dtype=torch.long, device=device),
+                                     "image_grid_thw": torch.tensor(image_grid_thw_mi, dtype=torch.long, device=device),
+                                     "pixel_values": torch.tensor(pixel_values_mi, dtype=torch.bfloat16, device=device)}
 
-                    mask_mi = [[1 for _ in seq] for seq in input_ids_mi]
-                    #logger.info(f"mask_mi before pad: {[len(s) for s in mask_mi]}")
-                    input_ids_mi = pad(input_ids_mi, padding_side='right', padding_value=self.processing_class.pad_token_id)
-                    #logger.info(f"prompt_ids_mi after pad: {[len(s) for s in input_ids_mi]}")
-                    mask_mi = pad(mask_mi, padding_side='right', padding_value=0)
-                    #logger.info(f"prompt_mask_new after pad: {[len(s) for s in mask_mi]}")
+                        if self.mi_mode["answer_type"] == "ground_truth":
+                            input_ids_mi_updated_original = [v["updated_original_sequence"] for v in considered_seqs.values()]
+                            mask_mi_original = [[1 for _ in seq] for seq in input_ids_mi_updated_original]
+                            input_ids_mi_updated_original = pad(input_ids_mi_updated_original, padding_side='right',
+                                                                padding_value=self.processing_class.pad_token_id)
+                            mask_mi_updated_original = pad(mask_mi_original, padding_side='right', padding_value=0)
+                            input_ids_mi_updated_original = torch.tensor(input_ids_mi_updated_original, dtype=torch.long,
+                                                                         device=device)
+                            mask_mi_updated_original = torch.tensor(mask_mi_updated_original, dtype=torch.long, device=device)
 
-                    inputs_mi = {"input_ids": torch.tensor(input_ids_mi, dtype=torch.long, device=device),
-                                 "attention_mask": torch.tensor(mask_mi, dtype=torch.long, device=device),
-                                 "image_grid_thw": torch.tensor(image_grid_thw_mi, dtype=torch.long, device=device),
-                                 "pixel_values": torch.tensor(pixel_values_mi, dtype=torch.bfloat16, device=device)}
+                        mi_batch_size = self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier
 
-                    if self.mi_mode["answer_type"] == "ground_truth":
-                        input_ids_mi_updated_original = [v["updated_original_sequence"] for v in considered_seqs.values()]
-                        mask_mi_original = [[1 for _ in seq] for seq in input_ids_mi_updated_original]
-                        input_ids_mi_updated_original = pad(input_ids_mi_updated_original, padding_side='right',
-                                                            padding_value=self.processing_class.pad_token_id)
-                        mask_mi_updated_original = pad(mask_mi_original, padding_side='right', padding_value=0)
-                        input_ids_mi_updated_original = torch.tensor(input_ids_mi_updated_original, dtype=torch.long,
-                                                                     device=device)
-                        mask_mi_updated_original = torch.tensor(mask_mi_updated_original, dtype=torch.long, device=device)
+                        logger.info(f"mi_batch_size: {mi_batch_size}")
+                        num_images_new = reduced_images_per_sample if self.mi_mode["alternative_action"] != "alternative_tool_call" else images_per_sample
+                        logger.info(f"num_images for vision fp: {num_images_new}; {len(num_images_new)}")
+                        logger.info(f"image_grid_thw for vision fp: {image_grid_thw_mi}; {image_grid_thw_mi.shape}")
+                        logger.info(f"pixel_values for vision fp: {pixel_values_mi.shape}")
+                        vision_masked_per_token_logps, vision_masked_per_token_entropies = self._get_per_token_logps(mi_masked_vision_forward_model,
+                                                                                      input_ids=inputs_mi["input_ids"],
+                                                                                      attention_mask = inputs_mi["attention_mask"],
+                                                  image_grid_thw=inputs_mi["image_grid_thw"],
+                                                  pixel_values=inputs_mi["pixel_values"],
+                                                  num_images=num_images_new,
+                                                  batch_size=mi_batch_size,
+                                                  disable_dropout=True, return_entropies=True)
+                        logger.info(f"after vision masked logp calculation")
 
-                    mi_batch_size = self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier
-
-                    logger.info(f"mi_batch_size: {mi_batch_size}")
-                    num_images_new = reduced_images_per_sample if self.mi_mode["alternative_action"] != "alternative_tool_call" else images_per_sample
-                    logger.info(f"num_images for vision fp: {num_images_new}; {len(num_images_new)}")
-                    logger.info(f"image_grid_thw for vision fp: {image_grid_thw_mi}; {image_grid_thw_mi.shape}")
-                    logger.info(f"pixel_values for vision fp: {pixel_values_mi.shape}")
-                    vision_masked_per_token_logps, vision_masked_per_token_entropies = self._get_per_token_logps(mi_masked_vision_forward_model,
-                                                                                  input_ids=inputs_mi["input_ids"],
-                                                                                  attention_mask = inputs_mi["attention_mask"],
-                                              image_grid_thw=inputs_mi["image_grid_thw"],
-                                              pixel_values=inputs_mi["pixel_values"],
-                                              num_images=num_images_new,
-                                              batch_size=mi_batch_size,
-                                              disable_dropout=True, return_entropies=True)
-                    logger.info(f"after vision masked logp calculation")
-
-                    if self.mi_mode["contrasted_score"] == "entropy":
-                        vision_masked_per_token_score = -vision_masked_per_token_entropies
-                    elif self.mi_mode["contrasted_score"] == "log_probs":
-                        vision_masked_per_token_score = vision_masked_per_token_logps
-                    elif self.mi_mode["contrasted_score"] == "probs":
-                        vision_masked_per_token_score = torch.exp(vision_masked_per_token_logps)
-                    else:
-                        raise ValueError(
-                            f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. Choose from ['entropy', 'log_probs']")
-
-
-                    if self.mi_mode["answer_type"] == "ground_truth":
-                        if self.mi_full_forward_model == "self":
-                            full_forward_model = model
-                        elif self.mi_full_forward_model == "reference":
-                            full_forward_model = self.ref_model
-                        logger.info(f"before ground_truth logp calculation")
-                        logger.info(f"input_ids_mi_updated_original: {input_ids_mi_updated_original}")
-                        logger.info(f"image_grid_thw: {multimodal_inputs["image_grid_thw"]}")
-                        full_forward_per_token_logps, full_forward_per_token_entropies = self._get_per_token_logps(full_forward_model,
-                                                  input_ids=input_ids_mi_updated_original,
-                                                  attention_mask=mask_mi_updated_original,
-                                                   image_grid_thw=multimodal_inputs["image_grid_thw"],
-                                                   pixel_values=multimodal_inputs["pixel_values"],
-                                                   num_images=images_per_sample,
-                                                   batch_size=self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier,
-                                                   disable_dropout=True,
-                                                   return_entropies=True)
-                        logger.info(f"after ground_truth logp calculation")
                         if self.mi_mode["contrasted_score"] == "entropy":
-                            full_forward_score = -full_forward_per_token_entropies
+                            vision_masked_per_token_score = -vision_masked_per_token_entropies
                         elif self.mi_mode["contrasted_score"] == "log_probs":
-                            full_forward_score = full_forward_per_token_logps
+                            vision_masked_per_token_score = vision_masked_per_token_logps
                         elif self.mi_mode["contrasted_score"] == "probs":
-                            full_forward_score = torch.exp(full_forward_per_token_logps)
+                            vision_masked_per_token_score = torch.exp(vision_masked_per_token_logps)
                         else:
                             raise ValueError(
-                                f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. "
-                                f"Choose from ['entropy', 'log_probs', 'probs']")
-                    else:
-                        if self.mi_full_forward_model == "self":
+                                f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. Choose from ['entropy', 'log_probs']")
+
+
+                        if self.mi_mode["answer_type"] == "ground_truth":
+                            if self.mi_full_forward_model == "self":
+                                full_forward_model = model
+                            elif self.mi_full_forward_model == "reference":
+                                full_forward_model = self.ref_model
+                            logger.info(f"before ground_truth logp calculation")
+                            logger.info(f"input_ids_mi_updated_original: {input_ids_mi_updated_original}")
+                            logger.info(f"image_grid_thw: {multimodal_inputs["image_grid_thw"]}")
+                            full_forward_per_token_logps, full_forward_per_token_entropies = self._get_per_token_logps(full_forward_model,
+                                                      input_ids=input_ids_mi_updated_original,
+                                                      attention_mask=mask_mi_updated_original,
+                                                       image_grid_thw=multimodal_inputs["image_grid_thw"],
+                                                       pixel_values=multimodal_inputs["pixel_values"],
+                                                       num_images=images_per_sample,
+                                                       batch_size=self.args.per_device_train_batch_size * self.scoring_batch_size_multiplier,
+                                                       disable_dropout=True,
+                                                       return_entropies=True)
+                            logger.info(f"after ground_truth logp calculation")
                             if self.mi_mode["contrasted_score"] == "entropy":
-                                full_forward_score = -old_per_token_entropies
+                                full_forward_score = -full_forward_per_token_entropies
                             elif self.mi_mode["contrasted_score"] == "log_probs":
-                                full_forward_score = old_per_token_logps
+                                full_forward_score = full_forward_per_token_logps
                             elif self.mi_mode["contrasted_score"] == "probs":
-                                full_forward_score = torch.exp(old_per_token_logps)
-                            else:
-                                raise ValueError(f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. "
-                                                 f"Choose from ['entropy', 'log_probs', 'probs']")
-                        elif self.mi_full_forward_model == "reference":
-                            if self.mi_mode["contrasted_score"] == "entropy":
-                                full_forward_score = -ref_per_token_entropies
-                            elif self.mi_mode["contrasted_score"] == "log_probs":
-                                full_forward_score = ref_per_token_logps
-                            elif self.mi_mode["contrasted_score"] == "probs":
-                                full_forward_score = torch.exp(ref_per_token_logps)
+                                full_forward_score = torch.exp(full_forward_per_token_logps)
                             else:
                                 raise ValueError(
                                     f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. "
                                     f"Choose from ['entropy', 'log_probs', 'probs']")
                         else:
-                            raise ValueError("mi_full_forward_model must be 'self' or 'reference'")
-
-                    logger.info(f"masked_score: {vision_masked_per_token_score}")
-
-                    logger.info(f"full_score: {full_forward_score}")
-
-                    contrast_diff_list = []
-                    if self.mi_mode["use_advantages_directly"]:
-                        override_advantages = torch.zeros((full_forward_score.shape[0], 3),
-                                                          dtype=torch.bfloat16, device=device)
-
-                    #contrasted_area = positions
-                    # diff = full_forward_score - vision_masked_per_token_score
-
-                    for idx in range(full_forward_score.shape[0]):
-                        if (self.mi_mode["alternative_action"] == "alternative_tool_call" and changed_idxs[idx] is True) or (self.mi_mode["alternative_action"] != "alternative_tool_call" and not considered_seqs[idx]["dummy"]):
-
-                            if not self.mi_mode["alternative_action"] == "alternative_tool_call":
-                                contrasted_area = considered_seqs[idx]["answer_position"]
-                                contrasted_area_short = considered_seqs[idx]["answer_position_short"]
+                            if self.mi_full_forward_model == "self":
+                                if self.mi_mode["contrasted_score"] == "entropy":
+                                    full_forward_score = -old_per_token_entropies
+                                elif self.mi_mode["contrasted_score"] == "log_probs":
+                                    full_forward_score = old_per_token_logps
+                                elif self.mi_mode["contrasted_score"] == "probs":
+                                    full_forward_score = torch.exp(old_per_token_logps)
+                                else:
+                                    raise ValueError(f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. "
+                                                     f"Choose from ['entropy', 'log_probs', 'probs']")
+                            elif self.mi_full_forward_model == "reference":
+                                if self.mi_mode["contrasted_score"] == "entropy":
+                                    full_forward_score = -ref_per_token_entropies
+                                elif self.mi_mode["contrasted_score"] == "log_probs":
+                                    full_forward_score = ref_per_token_logps
+                                elif self.mi_mode["contrasted_score"] == "probs":
+                                    full_forward_score = torch.exp(ref_per_token_logps)
+                                else:
+                                    raise ValueError(
+                                        f"contrasted_score is {self.mi_mode["contrasted_score"]}, which is unsupported. "
+                                        f"Choose from ['entropy', 'log_probs', 'probs']")
                             else:
-                                contrasted_area = considered_seqs[idx]["contrasted_area"]
-                                contrasted_area_short = considered_seqs[idx]["contrasted_area_short"]
+                                raise ValueError("mi_full_forward_model must be 'self' or 'reference'")
 
-                            logger.info(f"contrasted_area: {contrasted_area}")
-                            logger.info(f"contrasted_area_short: {contrasted_area_short}")
+                        logger.info(f"masked_score: {vision_masked_per_token_score}")
 
-                            logger.info(
-                                f"contrasted_area in context: {prompt_ids[idx][contrasted_area[0] - 3:contrasted_area[1] + 3]}")
-                            logger.info(f"contrasted_area_short in context: {inputs_mi["input_ids"][idx][contrasted_area_short[0]-3:contrasted_area_short[1]+3]}")
+                        logger.info(f"full_score: {full_forward_score}")
 
-                            assert contrasted_area[0] > 0
-                            assert contrasted_area[1] > contrasted_area[0]
-                            assert contrasted_area_short[0] > 0
-                            assert contrasted_area_short[1] > contrasted_area_short[0]
+                        #contrast_diff_list = []
+                        if self.mi_mode["use_advantages_directly"]:
+                            override_advantages = torch.zeros((full_forward_score.shape[0], 3),
+                                                              dtype=torch.bfloat16, device=device)
 
-                            # get rid of .exp for probs, except at the very end
+                        #contrasted_area = positions
+                        # diff = full_forward_score - vision_masked_per_token_score
 
-                            if self.mi_mode["alternative_action"] == "alternative_tool_call":
-                                original_score = full_forward_score[idx, contrasted_area[0] - 1: contrasted_area[1] - 1]
-                                alternative_score = vision_masked_per_token_score[idx, contrasted_area_short[0] - 1: contrasted_area_short[1] - 1]
-
-                                # TODO: unify the contrasted_score_type!
-                                if self.mi_mode["contrasted_score_type"] == "per_sequence":
-                                    original_score = torch.sum(original_score, dim=0, keepdim=True)
-                                    alternative_score = torch.sum(alternative_score, dim=0, keepdim=True)
-
-                            else:
-                                answer_scores_full = full_forward_score[idx,contrasted_area[0] - 1:contrasted_area[1] - 1]
-
-                                logger.info(f"answer_scores_full before multiplication: {answer_scores_full}")
-
-                                answer_scores_short = vision_masked_per_token_score[idx,
-                                contrasted_area_short[0] - 1:
-                                contrasted_area_short[1] - 1]
-
-                                logger.info(f"answer_scores_short before multiplication: {answer_scores_short}")
-
-                                #if contrasted_area[1] - contrasted_area[0]  !=  contrasted_area_short[1] - contrasted_area_short[0]:
-                                if self.mi_mode["contrasted_score_type"] == "per_sequence":
-                                    answer_scores_full = torch.sum(answer_scores_full, dim=0, keepdim=True)
-                                    answer_scores_short = torch.sum(answer_scores_short, dim=0, keepdim=True)
+                        for idx in range(full_forward_score.shape[0]):
+                            if (self.mi_mode["alternative_action"] == "alternative_tool_call" and changed_idxs[idx] is True) or (self.mi_mode["alternative_action"] != "alternative_tool_call" and not considered_seqs[idx]["dummy"]):
 
                                 if not self.mi_mode["alternative_action"] == "alternative_tool_call":
-                                    alternative_action_position = considered_seqs[idx]["alternative_action_position"]
-                                    alternative_action_position_short = considered_seqs[idx][
-                                        "alternative_action_position_short"]
+                                    contrasted_area = considered_seqs[idx]["answer_position"]
+                                    contrasted_area_short = considered_seqs[idx]["answer_position_short"]
+                                else:
+                                    contrasted_area = considered_seqs[idx]["contrasted_area"]
+                                    contrasted_area_short = considered_seqs[idx]["contrasted_area_short"]
 
-                                if self.mi_mode["importance_sampling"] == True:
-                                    logger.info(
-                                        f"alternative_action_position in context: {prompt_ids[idx][alternative_action_position[0] - 3:alternative_action_position[1] + 3]}")
-                                    logger.info(
-                                        f"alternative_action_position_short in context: {inputs_mi["input_ids"][idx][alternative_action_position_short[0] - 3:alternative_action_position_short[1] + 3]}")
+                                logger.info(f"contrasted_area: {contrasted_area}")
+                                logger.info(f"contrasted_area_short: {contrasted_area_short}")
 
-                                    if self.mi_mode["alternative_action"] == "second_model_generation":
-                                        alt_action_scores_full = full_forward_score[
-                                            idx, alternative_action_position[0] - 1:
-                                                 alternative_action_position[1] - 1]
+                                logger.info(
+                                    f"contrasted_area in context: {prompt_ids[idx][contrasted_area[0] - 3:contrasted_area[1] + 3]}")
+                                logger.info(f"contrasted_area_short in context: {inputs_mi["input_ids"][idx][contrasted_area_short[0]-3:contrasted_area_short[1]+3]}")
+
+                                assert contrasted_area[0] > 0
+                                assert contrasted_area[1] > contrasted_area[0]
+                                assert contrasted_area_short[0] > 0
+                                assert contrasted_area_short[1] > contrasted_area_short[0]
+
+                                # get rid of .exp for probs, except at the very end
+
+                                if self.mi_mode["alternative_action"] == "alternative_tool_call":
+                                    original_score = full_forward_score[idx, contrasted_area[0] - 1: contrasted_area[1] - 1]
+                                    alternative_score = vision_masked_per_token_score[idx, contrasted_area_short[0] - 1: contrasted_area_short[1] - 1]
+
+                                    # TODO: unify the contrasted_score_type!
+                                    if self.mi_mode["contrasted_score_type"] == "per_sequence":
+                                        original_score = torch.sum(original_score, dim=0, keepdim=True)
+                                        alternative_score = torch.sum(alternative_score, dim=0, keepdim=True)
+
+                                else:
+                                    answer_scores_full = full_forward_score[idx,contrasted_area[0] - 1:contrasted_area[1] - 1]
+
+                                    logger.info(f"answer_scores_full before multiplication: {answer_scores_full}")
+
+                                    answer_scores_short = vision_masked_per_token_score[idx,
+                                    contrasted_area_short[0] - 1:
+                                    contrasted_area_short[1] - 1]
+
+                                    logger.info(f"answer_scores_short before multiplication: {answer_scores_short}")
+
+                                    #if contrasted_area[1] - contrasted_area[0]  !=  contrasted_area_short[1] - contrasted_area_short[0]:
+                                    if self.mi_mode["contrasted_score_type"] == "per_sequence":
+                                        answer_scores_full = torch.sum(answer_scores_full, dim=0, keepdim=True)
+                                        answer_scores_short = torch.sum(answer_scores_short, dim=0, keepdim=True)
+
+                                    if not self.mi_mode["alternative_action"] == "alternative_tool_call":
+                                        alternative_action_position = considered_seqs[idx]["alternative_action_position"]
+                                        alternative_action_position_short = considered_seqs[idx][
+                                            "alternative_action_position_short"]
+
+                                    if self.mi_mode["importance_sampling"] == True:
                                         logger.info(
-                                            f"alt_action_scores_full before multiplication: {alt_action_scores_full}")
-                                        alt_action_scores_full = torch.prod(alt_action_scores_full)
+                                            f"alternative_action_position in context: {prompt_ids[idx][alternative_action_position[0] - 3:alternative_action_position[1] + 3]}")
+                                        logger.info(
+                                            f"alternative_action_position_short in context: {inputs_mi["input_ids"][idx][alternative_action_position_short[0] - 3:alternative_action_position_short[1] + 3]}")
+
+                                        if self.mi_mode["alternative_action"] == "second_model_generation":
+                                            alt_action_scores_full = full_forward_score[
+                                                idx, alternative_action_position[0] - 1:
+                                                     alternative_action_position[1] - 1]
+                                            logger.info(
+                                                f"alt_action_scores_full before multiplication: {alt_action_scores_full}")
+                                            alt_action_scores_full = torch.prod(alt_action_scores_full)
+                                        else:
+                                            alt_action_scores_full = 1
+
+                                        alt_action_scores_short = vision_masked_per_token_score[
+                                            idx, alternative_action_position_short[0] - 1:
+                                                 alternative_action_position_short[1] - 1]
+
+                                        logger.info(
+                                            f"alt_action_scores_short before multiplication: {alt_action_scores_short}")
+                                        alt_action_scores_short = torch.prod(alt_action_scores_short)
+                                        logger.info(f"alt_action_scores_short: {alt_action_scores_short}")
+                                        logger.info(f"alt_action_scores_full: {alt_action_scores_full}")
+                                        importance_sampling_ratio = alt_action_scores_short / alt_action_scores_full
                                     else:
-                                        alt_action_scores_full = 1
+                                        importance_sampling_ratio = 1
 
-                                    alt_action_scores_short = vision_masked_per_token_score[
-                                        idx, alternative_action_position_short[0] - 1:
-                                             alternative_action_position_short[1] - 1]
+                                    logger.info(f"answer_scores_full: {answer_scores_full}")
+                                    logger.info(f"answer_scores_short: {answer_scores_short}")
+                                    logger.info(f"importance_sampling_ratio: {importance_sampling_ratio}")
 
-                                    logger.info(
-                                        f"alt_action_scores_short before multiplication: {alt_action_scores_short}")
-                                    alt_action_scores_short = torch.prod(alt_action_scores_short)
-                                    logger.info(f"alt_action_scores_short: {alt_action_scores_short}")
-                                    logger.info(f"alt_action_scores_full: {alt_action_scores_full}")
-                                    importance_sampling_ratio = alt_action_scores_short / alt_action_scores_full
-                                else:
-                                    importance_sampling_ratio = 1
+                                    if self.mi_mode["alternative_action"] == "alternative_tool_call_without_execution":
+                                        original_score = answer_scores_full
+                                        alternative_score = answer_scores_short
 
-                                logger.info(f"answer_scores_full: {answer_scores_full}")
-                                logger.info(f"answer_scores_short: {answer_scores_short}")
-                                logger.info(f"importance_sampling_ratio: {importance_sampling_ratio}")
-
-                                if self.mi_mode["alternative_action"] == "alternative_tool_call_without_execution":
-                                    original_score = answer_scores_full
-                                    alternative_score = answer_scores_short
-
-                            if self.mi_mode["use_info_nce"]:
-                                # safe way of writing ln(x/0.5(x+y))
-                                contrast_diff = torch.logaddexp(original_score,original_score) - \
-                                                torch.logaddexp(original_score,alternative_score)
-                            else:
-                                contrast_diff = original_score - alternative_score
-
-                            contrast_diff_list.append(contrast_diff.detach())
-
-                            if contrast_diff.numel() != 0:
-                                # logger.info(f"diff in contrasted area: {contrast_diff}")
-                                logger.info(f"contrast diff mean: {torch.mean(contrast_diff)}")
-                                logger.info(f"contrast diff max: {torch.max(contrast_diff)}")
-                                logger.info(f"contrast diff min: {torch.min(contrast_diff)}")
-                                logger.info(f"contrast diff sum: {torch.sum(contrast_diff)}")
-                                for q in [0.1, 0.3, 0.5, 0.7, 0.9]:
-                                    logger.info(f"q={q}: {torch.quantile(contrast_diff.to(torch.float32), q)}")
-
-                                x_np = contrast_diff.detach().cpu().float().numpy().ravel()
-                                index_for_rank_correl = np.arange(x_np.size)
-                                rho, p = spearmanr(x_np, index_for_rank_correl, nan_policy='omit')
-                                logger.info(f"spearman rho: {rho}, p: {p}")
+                                negatives_list[negative_idx].append(alternative_score)
+                                positives_list.append(original_score)
 
                             else:
-                                logger.info(f"contrast diff contains no elements!")
+                                #contrast_diff_list.append(None)
+                                negatives_list[negative_idx].append(None)
+                                positives_list.append(None)
 
+                    # Combine negatives for final contrastive score. For this, traverse it column first, combining the rows
+                    contrast_diff_list = []
+                    for negative_rollout_id in range(len(negatives_list[0])):
+                        invalid_count = 0
+                        for negative_sample_id in range(len(negatives_list)):
+                            if negatives_list[negative_sample_id][negative_rollout_id] is None:
+                                invalid_count += 1
 
-                            if self.mi_mode["use_advantages_directly"] == True:
-                                override_advantages[idx, 0] = contrast_diff[0]
-                                override_advantages[idx, 1] = 0
-                                if self.mi_mode["custom_advantage_position"] == "state":
-                                    override_advantages[idx, 2] = alternative_action_position_short[0] - 1
+                        if self.mi_mode["multi_negative_mode"] == "strict":
+                            if invalid_count > 0:
+                                contrast_diff_list.append(None)
+                                continue
+                        else:
+                            if invalid_count == len(negatives_list):
+                                contrast_diff_list.append(None)
+                                continue
+
+                        if positives_list[negative_rollout_id] is None:
+                            contrast_diff_list.append(None)
+                            continue
+
+                        for negative_sample_id in range(len(negatives_list)):
+                            if negative_sample_id == 0:
+                                if self.mi_mode["use_info_nce"]:
+                                    contrast_diff_nom =  torch.logaddexp(positives_list[negative_rollout_id], positives_list[negative_rollout_id])
+                                    contrast_diff_denom = torch.logaddexp(positives_list[negative_rollout_id], negatives_list[negative_sample_id][negative_rollout_id])
                                 else:
-                                    # we're currently not logging the end of the tool call...
-                                    raise NotImplementedError(f"custom advantage position = state_and_action not implemented!")
+                                    contrast_diff_nom = positives_list[negative_rollout_id]
+                                    contrast_diff_denom = negatives_list[negative_sample_id][negative_rollout_id]
+                            else:
+                                contrast_diff_nom = torch.logaddexp(contrast_diff_nom, positives_list[negative_rollout_id])
+                                contrast_diff_denom = torch.logaddexp(contrast_diff_denom, negatives_list[negative_sample_id][negative_rollout_id])
+                        contrast_diff = contrast_diff_nom - contrast_diff_denom
+
+                        contrast_diff_list.append(contrast_diff.detach())
+
+                        if contrast_diff.numel() != 0:
+                            # logger.info(f"diff in contrasted area: {contrast_diff}")
+                            logger.info(f"contrast diff mean: {torch.mean(contrast_diff)}")
+                            logger.info(f"contrast diff max: {torch.max(contrast_diff)}")
+                            logger.info(f"contrast diff min: {torch.min(contrast_diff)}")
+                            logger.info(f"contrast diff sum: {torch.sum(contrast_diff)}")
+                            for q in [0.1, 0.3, 0.5, 0.7, 0.9]:
+                                logger.info(f"q={q}: {torch.quantile(contrast_diff.to(torch.float32), q)}")
+
+                            x_np = contrast_diff.detach().cpu().float().numpy().ravel()
+                            index_for_rank_correl = np.arange(x_np.size)
+                            rho, p = spearmanr(x_np, index_for_rank_correl, nan_policy='omit')
+                            logger.info(f"spearman rho: {rho}, p: {p}")
 
                         else:
-                            contrast_diff_list.append(None)
+                            logger.info(f"contrast diff contains no elements!")
+
+                        if self.mi_mode["use_advantages_directly"] == True:
+                            override_advantages[negative_rollout_id, 0] = contrast_diff[0]
+                            override_advantages[negative_rollout_id, 1] = 0
+                            if self.mi_mode["custom_advantage_position"] == "state":
+                                override_advantages[negative_rollout_id, 2] = alternative_action_position_short[0] - 1
+                            else:
+                                # we're currently not logging the end of the tool call...
+                                raise NotImplementedError(f"custom advantage position = state_and_action not implemented!")
+
                     if override_advantages is not None:
                         override_advantages = override_advantages * 2.65
                         logger.info(f"override advantages: {override_advantages}")
