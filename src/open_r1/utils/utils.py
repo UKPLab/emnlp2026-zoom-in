@@ -40,11 +40,15 @@ def basic_iou_target_fn(step, start:float, end:float, increase: str, max_value: 
             return 1
         return max_value * float(step - start) / float(div)
 
+def calculate_iou(box1,box2):
+    return calculate_overlap_metrics(box1,box2)[0]
 
-def calculate_iou(box1, box2):
+def calculate_overlap_metrics(box1, box2):
     """
     Calculate IoU of two bounding boxes [x1, y1, x2, y2].
     Uses NumPy for a fast, "out-of-the-box" vectorizable approach.
+    box1 is prediction
+    box2 is ground truth
     """
     box1 = np.array(box1)
     box2 = np.array(box2)
@@ -56,7 +60,7 @@ def calculate_iou(box1, box2):
     y_bottom = min(box1[3], box2[3])
 
     if x_right < x_left or y_bottom < y_top:
-        return 0.0
+        return 0.0, 0.0, 0.0
 
     # The intersection of two axis-aligned bounding boxes is always an
     # axis-aligned bounding box
@@ -66,11 +70,16 @@ def calculate_iou(box1, box2):
     box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
     box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
 
+    union = box1_area + box2_area - intersection_area
+
     # Compute the intersection over union by taking the intersection
     # area and dividing it by the sum of prediction + ground-truth
     # areas - the intersection area
-    iou = intersection_area / float(box1_area + box2_area - intersection_area)
-    return iou
+    iou = (intersection_area / union) if union > 0.0 else 0.0
+    precision = (intersection_area / box1_area) if box1_area > 0.0 else 0.0
+    recall = (intersection_area / box2_area) if box2_area > 0.0 else 0.0
+
+    return iou,precision,recall
 
 
 
@@ -450,6 +459,7 @@ def generate_bbox_2d_new_close_iou_targeted(
     min_crop_size: int = 28,
     seed: Optional[int] = None,
     return_debug: bool = False,
+    same_digit_number: bool = False, # if true, enforces that the number of digits for all 4 pixels in bbox_2d and bbox_2d_new are the same
 ) -> Union[BBoxOut, Tuple[BBoxOut, dict]]:
     """
     Target-aware proposal + rejection sampling to get realized IoU close to target_iou.
@@ -580,25 +590,36 @@ def generate_bbox_2d_new_close_iou_targeted(
         iou_sim = _iou_i(ref_pix, cand_sim_pix)
         err = abs(iou_sim - target_iou)
 
+        is_digit_number_valid = True
+        print(f"same digit number: {same_digit_number}")
+        print(f"bbox_2d: {bbox_2d}, bbox_new: {bbox_new}")
+        if same_digit_number:
+            for idx in range(4):
+                if str(bbox_new[idx]) != str(bbox_2d[idx]):
+                    print(f"bbox is invalid")
+                    is_digit_number_valid = False
+
         if err < best_err:
-            best_err = err
-            best_bbox = bbox_new
-            best_dbg = {
-                "attempt": attempt,
-                "mode": mode,
-                "img_size": (img_w, img_h),
-                "input_size": (int(input_w), int(input_h)),
-                "eff_padding": eff_pad,
-                "ref_pixel_box": ref_pix,
-                "proposal_pixel_box": cand_pix,
-                "new_pixel_box_simulated": cand_sim_pix,
-                "target_iou": target_iou,
-                "simulated_iou": iou_sim,
-                "abs_error": err,
-                "ref_final_norm": ref_final_norm,
-                "cand_final_norm_targeted": cand_final_norm,
-                "cand_final_norm_simulated": cand_sim_final,
-            }
+
+            if is_digit_number_valid:
+                best_err = err
+                best_bbox = bbox_new
+                best_dbg = {
+                    "attempt": attempt,
+                    "mode": mode,
+                    "img_size": (img_w, img_h),
+                    "input_size": (int(input_w), int(input_h)),
+                    "eff_padding": eff_pad,
+                    "ref_pixel_box": ref_pix,
+                    "proposal_pixel_box": cand_pix,
+                    "new_pixel_box_simulated": cand_sim_pix,
+                    "target_iou": target_iou,
+                    "simulated_iou": iou_sim,
+                    "abs_error": err,
+                    "ref_final_norm": ref_final_norm,
+                    "cand_final_norm_targeted": cand_final_norm,
+                    "cand_final_norm_simulated": cand_sim_final,
+                }
 
 
         #print(other_bboxes_boxI)
@@ -610,7 +631,7 @@ def generate_bbox_2d_new_close_iou_targeted(
                     if _iou_i(other_bbox, cand_sim_pix) > other_bbox_threshold:
                         too_close_to_previous = True
             print(f"too close to previous: {too_close_to_previous}")
-            if not too_close_to_previous:
+            if not too_close_to_previous and is_digit_number_valid:
                 print(f"returning bbox")
                 if return_debug:
                     return bbox_new, best_dbg

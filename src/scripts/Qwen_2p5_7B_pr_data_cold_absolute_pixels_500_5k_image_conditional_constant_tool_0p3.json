@@ -28,29 +28,17 @@
     "multi_turn": "tool",
     "reward_funcs": [
       "accuracy",
-      "mutual_information"
+      "pr_penalty"
     ],
     "reward_func_weights": [
       1.0,
-      0.1
+      -0.3
     ],
     "reward_func_conditionals": [
       false,
       true
     ],
-    "mi_alternative_action": "alternative_tool_call",
-    "mi_use_advantages_directly": false,
-    "mi_contrasted_score": "log_probs",
-    "mi_use_info_nce": true,
-    "iou_target_zero": 0.3,
-    "iou_target_one": 1.0,
-    "iou_target_increase": "linear",
-    "iou_target_max_value": 0.175,
-    "mutual_information_clip_value": 1.5,
-    "mi_tanh": true,
-    "mutual_information_length_factor": 1.0,
-    "mi_masked_vision_forward_model": "self",
-    "mi_full_forward_model": "self",
+    "tool_use_penalty_threshold": 0,
     "chat_template": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/qwen_chat_template_tool.json",
     "per_device_eval_batch_size": 4,
     "learning_rate": 1e-6,

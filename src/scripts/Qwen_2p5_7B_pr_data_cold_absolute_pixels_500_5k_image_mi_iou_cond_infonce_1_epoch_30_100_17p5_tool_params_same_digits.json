@@ -38,9 +38,12 @@
       false,
       true
     ],
-    "mi_alternative_action": "alternative_tool_call",
+    "mi_alternative_action": "alternative_tool_call_without_execution",
+    "mi_answer_type": "alternative_tool_parameters",
+    "mi_same_digit_number": true,
     "mi_use_advantages_directly": false,
     "mi_contrasted_score": "log_probs",
+    "mi_contrasted_score_type": "per_token",
     "mi_use_info_nce": true,
     "iou_target_zero": 0.3,
     "iou_target_one": 1.0,

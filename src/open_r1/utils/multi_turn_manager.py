@@ -697,7 +697,8 @@ class MultiTurn:
                                   step: int = None,
                                   iou_target: float = None,
                                   tool_turn_selection: str = None,
-                                  negative_bboxes: list[list[tuple]] = None # rows are negatives, cols are rollouts
+                                  negative_bboxes: list[list[tuple]] = None, # rows are negatives, cols are rollouts
+                                  same_digit_number: bool = False
                                   ):
         """
         alternative_action: "second_model_generation", "double_newline",
@@ -731,7 +732,8 @@ class MultiTurn:
                                                      image_paths = copy.deepcopy(image_path),
                                                      step = step, iou_target = iou_target, save_path = save_path,
                                                      tool_turn_selection = tool_turn_selection,
-                                                     negative_bboxes = [negative[idx] for negative in negative_bboxes if negative[idx] is not None]
+                                                     negative_bboxes = [negative[idx] for negative in negative_bboxes if negative[idx] is not None],
+                                                     same_digit_number=same_digit_number
                                                      )
             if isinstance(validity, tuple):
                 new_bbox = validity[2]
@@ -797,7 +799,8 @@ class MultiTurn:
                                  step: int = None,
                                  iou_target: float = None,
                                  tool_turn_selection: str = None,
-                                 negative_bboxes: list[tuple] = None # every entry is the bbox for a single negative for this rollout
+                                 negative_bboxes: list[tuple] = None, # every entry is the bbox for a single negative for this rollout
+                                 same_digit_number: bool = False
                                  ):
         """
         alternative_action: "second_model_generation", "double_newline",
@@ -942,7 +945,12 @@ class MultiTurn:
                                                                         image_paths=image_paths,
                                                                         tool=copy.deepcopy(self.tools[0]),
                                                                         only_return_new_bbox=True,
-                                                                        negative_bboxes=negative_bboxes)
+                                                                        negative_bboxes=negative_bboxes,
+                                                                        same_digit_number=same_digit_number)
+
+            if alternative_tool_execution is None:
+                logger.info(f"no alternative seq possible: alternative_tool_execution failed")
+                return None
 
             new_bbox = alternative_tool_execution["new_bbox"]
 
@@ -1097,7 +1105,7 @@ class MultiTurn:
 
     def get_alternative_tool_call(self, save_path: str, step:int, tool_call: str, iou_target: float,
                                   image_paths:list[str], tool: Tool, only_return_new_bbox:bool=False,
-                                  negative_bboxes: list[tuple] = None) -> Optional[dict]:
+                                  negative_bboxes: list[tuple] = None, same_digit_number: bool = False) -> Optional[dict]:
         """
         if the tool call fails, returns None
         otherwise, returns a dict with 'prompts' and 'image_paths', ready to be fed into self.add_user_message
@@ -1112,8 +1120,9 @@ class MultiTurn:
                 if (tool.name == tool_params["name"] or
                    (tool_params["name"] == "crop_image" and tool.name == "crop_image_normalized")):
                     tool_call_result = tool.call_tool(tool_params, save_path, generate_and_use_new_bbox={"iou_target": iou_target,
-                                                                                                         "negative_bboxes": negative_bboxes},
-                                                      only_return_new_bbox=only_return_new_bbox,
+                                                                                                         "negative_bboxes": negative_bboxes,
+                                                                                                         "same_digit_number": same_digit_number},
+                                                      only_return_new_bbox=only_return_new_bbox
                                                       )
                     if only_return_new_bbox:
                         return {"new_bbox": tool_call_result["new_bbox"]}

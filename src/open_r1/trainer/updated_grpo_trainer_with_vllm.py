@@ -1351,7 +1351,8 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                             step=self.state.global_step,
                             iou_target=iou_target,
                             tool_turn_selection=self.mi_mode["tool_turn_selection"],
-                            negative_bboxes=negative_bboxes
+                            negative_bboxes=negative_bboxes,
+                            same_digit_number=self.mi_mode["same_digit_number"]
                         )
                         negative_bboxes.append(new_bboxes)
                         if self.mi_mode["alternative_action"] == "alternative_tool_call":
@@ -1940,14 +1941,31 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
         t9 = time.time()
         self._metrics["live_logp_time"].append(t9 - t8)
 
-        def check_nan(tensor: torch.Tensor, **kwargs):
-            if torch.isnan(tensor).any():
-                logger.info(f"tensor contains nan!")
-                for k,v in kwargs.items():
-                    logger.info(f"{k}: {v}")
-                sys.exit(1)
+        def contains_nan(tensor: torch.Tensor, name="tensor", terminate=True, **kwargs):
+            bad = ~torch.isfinite(tensor)
+            if bad.any():
+                # Print a small, actionable summary
+                idx = bad.nonzero(as_tuple=False)
+                print(f"[check_finite] {name} contains non-finite values!")
+                print(
+                    f"[check_finite] {name}: dtype={tensor.dtype}, device={tensor.device}, shape={tuple(tensor.shape)}")
+                print(f"[check_finite] count_bad={idx.shape[0]}")
+                # show a few offending entries
+                max_show = min(10, idx.shape[0])
+                print(f"[check_finite] first_bad_indices={idx[:max_show].tolist()}")
+                print(
+                    f"[check_finite] first_bad_values={tensor[tuple(idx[0].tolist())].item() if idx.shape[1] == 0 else 'see indices'}")
+                for k, v in kwargs.items():
+                    print(f"[check_finite] {k}: {v}")
+                if terminate:
+                    raise FloatingPointError(f"{name} has non-finite values")
+                else:
+                    return True
+                
+            return False
+                    
 
-        check_nan(per_token_logps, per_token_logps=per_token_logps, prompt_ids=prompt_ids, prompt_mask=prompt_mask)
+        contains_nan(per_token_logps, per_token_logps=per_token_logps, prompt_ids=prompt_ids, prompt_mask=prompt_mask)
 
         # TODO: get rid of all user written input
         # Get rid of the prompt (-1 because of the shift done in get_per_token_logps)
@@ -1964,36 +1982,41 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             advantages[i, int(override_advantages[i, 1]): int(override_advantages[i, 2])] = override_advantages[i, 0]
 
         logger.info(f"in compute loss: advantages: {advantages}")
-        check_nan(advantages, advantages=advantages, raw_advantages=raw_advantages,
+        contains_nan(advantages, advantages=advantages, raw_advantages=raw_advantages,
                   override_advantages=override_advantages)
 
         # When using num_iterations == 1, old_per_token_logps == per_token_logps, so we can skip its computation
         # and use per_token_logps.detach() instead
         old_per_token_logps = inputs["old_per_token_logps"] if self.num_iterations > 1 else per_token_logps.detach()
 
-        check_nan(old_per_token_logps, old_per_token_logps=old_per_token_logps)
+        contains_nan(old_per_token_logps, old_per_token_logps=old_per_token_logps)
 
         # Compute the policy ratio and clipped version
         coef_1 = torch.exp(per_token_logps - old_per_token_logps)
         coef_2 = torch.clamp(coef_1, 1 - self.epsilon, 1 + self.epsilon)
 
-        check_nan(coef_1, coef_1=coef_1)
-        check_nan(coef_2, coef_2=coef_2)
+        contains_nan(coef_1, coef_1=coef_1)
+        contains_nan(coef_2, coef_2=coef_2)
 
         per_token_loss1 = coef_1 * advantages
         per_token_loss2 = coef_2 * advantages
         per_token_loss = -torch.min(per_token_loss1, per_token_loss2)
 
-        check_nan(per_token_loss, per_token_loss=per_token_loss, per_token_loss1=per_token_loss1, per_token_loss2=per_token_loss2)
+        contains_nan(per_token_loss, per_token_loss=per_token_loss, per_token_loss1=per_token_loss1, per_token_loss2=per_token_loss2)
 
         #ignored_tokens_mask = completion_mask * user_mask
 
         # Add KL penalty if beta > 0
         if self.beta > 0:
             ref_per_token_logps = inputs["ref_per_token_logps"]
-            check_nan(ref_per_token_logps, ref_per_token_logps=ref_per_token_logps)
+            contains_nan(ref_per_token_logps, ref_per_token_logps=ref_per_token_logps)
+            
+
             per_token_kl = torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
-            check_nan(per_token_kl, per_token_kl=per_token_kl)
+            if contains_nan(per_token_kl, per_token_kl=per_token_kl, terminate=False):
+                per_token_kl = torch.nan_to_num(
+                    per_token_kl, nan=0.0, posinf=0.0, neginf=0.0
+                )
             per_token_loss = per_token_loss + self.beta * per_token_kl
             #logger.info(f"per token kl of user: {(per_token_kl * ~user_mask).sum(dim=1) / (~user_mask).sum(dim=1)}")
             #logger.info(f"per token kl without user: {(per_token_kl * user_mask).sum(dim=1) / (user_mask).sum(dim=1)}")
@@ -2017,7 +2040,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
 
         #self.monitor_gpu_usage("compute loss: before return")
 
-        check_nan(loss, loss=loss, non_generation_mask_shape=non_generation_mask.shape,
+        contains_nan(loss, loss=loss, non_generation_mask_shape=non_generation_mask.shape,
                   non_generation_mask_sum=non_generation_mask.sum(dim=1))
 
         return loss

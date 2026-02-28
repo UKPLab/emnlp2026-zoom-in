@@ -28,6 +28,8 @@ def get_results(path:str, metrics: list[str], is_verl=False):
         try:
             if metric == "accuracy":
                 result[metric] = np.mean(np.array(data["accuracy"]))*100
+            if metric == "no_answer":
+                result[metric] = np.mean(np.array(data["no_answer"]))*100
             if metric == "avg_pixel_reasoning":
                 result[metric] = np.mean(np.array(data["tool_use"]))
             if metric == "pixel_reasoning_distr":
@@ -56,17 +58,26 @@ def get_results(path:str, metrics: list[str], is_verl=False):
             if metric == "zoom_in_fraction_median":
                 image_fractions = np.array([(sample[1][0] * sample[1][1])/(sample[0][0] * sample[0][1]) for idx, sample in enumerate(data["image_sizes"]) if len(sample) > 1])
                 result[metric] = np.median(image_fractions)
-            if metric == "ious":
+            if metric in ["ious", "precision", "recall"]:
                 if is_verl:
-                    last = [sample[-1] for sample in data["ious"] if len(sample) > 0]
+                    last = [sample[-1] for sample in data[metric] if len(sample) > 0]
                     result[metric] = np.mean(np.array(last)).round(4).item()*100
                 else:
-                    result[metric] = np.mean(np.array(data["ious"][0])).round(4).item() * 100 if len(data["ious"]) > 0 else 0
-            if metric == "iou_distr":
+                    result[metric] = np.mean(np.array(data[metric][0])).round(4).item() * 100 if len(data[metric]) > 0 else 0
+            if metric in ["iou_distr", "precision_distr", "recall_distr"]:
+                metric_map = {"iou_distr": "ious", "precision_distr": "precision", "recall_distr": "recall"}
+
                 distr = []
-                for i in range(len(data["ious"])):
-                    distr.append(np.mean(np.array(data["ious"][i])).round(4).item()*100)
+                for i in range(len(data[metric_map[metric]])):
+                    distr.append(np.mean(np.array(data[metric_map[metric]][i])).round(4).item()*100)
                 result[metric] = ";".join([str(d) for d in distr])
+            if metric in ["iou_std", "precision_std", "recall_std"]:
+                metric_map = {"iou_std": "ious", "precision_std": "precision", "recall_std": "recall"}
+                if is_verl:
+                    last = [sample[-1] for sample in data[metric_map[metric]] if len(sample) > 0]
+                    result[metric] = np.std(np.array(last)).round(4).item()*100
+                else:
+                    result[metric] = np.std(np.array(data[metric_map[metric]][0])).round(4).item() * 100 if len(data[metric_map[metric]]) > 0 else 0
             if metric == "avg_total_completion_len":
                 result[metric] = np.mean(np.array([sum(sample) for sample in data["completion_len"]]))
             if metric == "avg_first_completion_len":

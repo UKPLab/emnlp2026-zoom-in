@@ -42,6 +42,7 @@
     "mi_use_advantages_directly": false,
     "mi_contrasted_score": "log_probs",
     "mi_use_info_nce": true,
+    "mi_tool_turn_selection": "last",
     "iou_target_zero": 0.3,
     "iou_target_one": 1.0,
     "iou_target_increase": "linear",
@@ -56,7 +57,7 @@
     "learning_rate": 1e-6,
     "lr_scheduler_type": "constant_with_warmup",
     "warmup_ratio": 0.03,
-    "max_tool_uses": 1,
+    "max_tool_uses": 2,
     "max_pixels": 3920000,
     "min_pixels": 392000,
     "epsilon": 0.2,
@@ -74,7 +75,7 @@
     "min_pixels": "infer",
     "max_pixels": "infer",
     "enable_prefix_caching": true,
-    "limit_image_per_prompt": 3
+    "limit_image_per_prompt": 4
   }
 }
 

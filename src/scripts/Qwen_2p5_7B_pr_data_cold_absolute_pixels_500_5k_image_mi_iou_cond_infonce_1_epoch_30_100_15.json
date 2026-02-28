@@ -45,7 +45,7 @@
     "iou_target_zero": 0.3,
     "iou_target_one": 1.0,
     "iou_target_increase": "linear",
-    "iou_target_max_value": 0.175,
+    "iou_target_max_value": 0.15,
     "mutual_information_clip_value": 1.5,
     "mi_tanh": true,
     "mutual_information_length_factor": 1.0,

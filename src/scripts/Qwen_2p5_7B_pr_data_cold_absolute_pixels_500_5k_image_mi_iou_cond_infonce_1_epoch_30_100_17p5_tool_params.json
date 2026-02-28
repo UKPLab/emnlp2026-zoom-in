@@ -38,9 +38,11 @@
       false,
       true
     ],
-    "mi_alternative_action": "alternative_tool_call",
+    "mi_alternative_action": "alternative_tool_call_without_execution",
+    "mi_answer_type": "alternative_tool_parameters",
     "mi_use_advantages_directly": false,
     "mi_contrasted_score": "log_probs",
+    "mi_contrasted_score_type": "per_sequence",
     "mi_use_info_nce": true,
     "iou_target_zero": 0.3,
     "iou_target_one": 1.0,
@@ -65,7 +67,7 @@
     "strict_tool_extraction": true,
     "global_buffer": true,
     "save_strategy": "epoch",
-    "save_only_model": true,
+    "save_only_model": false,
     "vllm_server_timeout": 600.0,
     "shuffle_dataset": true
   },

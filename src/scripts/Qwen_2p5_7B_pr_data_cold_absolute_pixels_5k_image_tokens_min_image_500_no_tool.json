@@ -23,7 +23,7 @@
     "bf16": true,
     "logging_steps": 1,
     "logging": true,
-    "num_train_epochs": 3,
+    "num_train_epochs": 1,
     "temperature": 1.0,
     "multi_turn": null,
     "reward_funcs": [
@@ -41,7 +41,7 @@
     "chat_template": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/qwen_chat_template_tool.json",
     "per_device_eval_batch_size": 4,
     "learning_rate": 1e-6,
-    "lr_scheduler_type": "cosine",
+    "lr_scheduler_type": "constant_with_warmup",
     "warmup_ratio": 0.03,
     "max_tool_uses": 1,
     "max_pixels": 3920000,
@@ -50,7 +50,7 @@
     "tool_config": "no_tool",
     "global_buffer": true,
     "save_strategy": "epoch",
-    "save_only_model": false,
+    "save_only_model": true,
     "vllm_server_timeout": 600.0,
     "shuffle_dataset": true
   },

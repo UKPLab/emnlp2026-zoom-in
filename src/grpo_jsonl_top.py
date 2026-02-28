@@ -332,6 +332,13 @@ class GRPOScriptArguments(ScriptArguments):
         }
     )
 
+    mi_same_digit_number: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "whether to enforce that the number of digits for all 4 px values in the negative and positive tool calls are the same"
+        }
+    )
+
     #mi_short_bridge: Optional[str] = field(
     #    default=None,
     #    metadata={
@@ -703,7 +710,8 @@ def main(script_args, training_args, model_args):
                "use_info_nce": script_args.mi_use_info_nce,
                 "tool_turn_selection": script_args.mi_tool_turn_selection,
                 "num_negatives": script_args.mi_num_negatives,
-                "multi_negative_mode": script_args.mi_multi_negative_mode
+                "multi_negative_mode": script_args.mi_multi_negative_mode,
+                "same_digit_number": script_args.mi_same_digit_number
     }
 
 

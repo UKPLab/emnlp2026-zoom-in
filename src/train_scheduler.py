@@ -270,75 +270,45 @@ if __name__ == "__main__":
 
     runs = [
 
-        #{
-        #    "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_conditional_constant_tool_0p05.json",
-        #    "shell_number": 1,
-        #    "path": "",
-        #    "state": "wait"
-        #},
         {
-            "json_name": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_continue_pr.json",
-            "shell_number": 1,
-            "path": "",
-            "state": "running"
-        },
-
-
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_conditional_constant_tool_1p0.json",
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_conditional_constant_tool_0p03.json",
             "shell_number": 3,
             "path": "",
             "state": "running"
         },
-
         {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_padding_0p0.json",
-            "shell_number": 2,
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool.json",
+            "shell_number": 1,
             "path": "",
-            "state": "running"
+            "state": "finished"
         },
-
         {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_padding_0p05.json",
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_tool_params.json",
             "shell_number": 2,
             "path": "",
             "state": "finished"
         },
 
         {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_padding_0p0.json",
-            "shell_number": 3,
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_15.json",
+            "shell_number": 1,
             "path": "",
             "state": "running"
         },
 
         {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_first_20_mean_describe.json",
-            "shell_number": 2,
-            "path": "",
-            "state": "running"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_30_100_17p5_first_20_mean_roadmap.json",
-            "shell_number": 2,
-            "path": "",
-            "state": "wait"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_first_20_mean_roadmap.json",
-            "shell_number": 3,
-            "path": "",
-            "state": "running"
-        },
-
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_negatives_2.json",
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_20.json",
             "shell_number": 2,
             "path": "",
             "state": "to_be_launched"
         },
 
-
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_tool_params_same_digits.json",
+            "shell_number": 2,
+            "path": "",
+            "state": "wait"
+        },
 
 
     ]

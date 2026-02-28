@@ -11,7 +11,7 @@ import PIL
 from open_r1.utils.rewards import accuracy_reward
 from trl.data_utils import is_conversational
 
-from open_r1.utils.utils import calculate_iou
+from open_r1.utils.utils import calculate_overlap_metrics
 from open_r1.vlm_modules import Qwen2VLModule
 from transformers import AutoProcessor
 from vllm import LLM, SamplingParams
@@ -368,26 +368,28 @@ class Evaluator:
 
             gold_bboxes = [x['bbox'] for x in inputs]
             logger.info(f"gold_bboxes: {gold_bboxes}")
-    
-            ious = []
-            for idx in range(len(gold_bboxes)):
-                if gold_bboxes[idx] is None:
-                    logger.info(f"gold_bbox is None for sample {idx}, skipping")
-                    continue
-                for tool_use_idx in range(len(bboxes[idx])):
-                    iou = calculate_iou(gold_bboxes[idx], bboxes[idx][tool_use_idx])
-                    if len(ious) < tool_use_idx + 1:
-                        ious.append([iou])
+
+            overlap_metric_names = ["ious", "precision", "recall"]
+            for overlap_metric_idx, overlap_metric_name in enumerate(overlap_metric_names):
+                overlap_metrics = []
+                for idx in range(len(gold_bboxes)):
+                    if gold_bboxes[idx] is None:
+                        logger.info(f"gold_bbox is None for sample {idx}, skipping")
+                        continue
+                    for tool_use_idx in range(len(bboxes[idx])):
+                        overlap_metric = calculate_overlap_metrics(bboxes[idx][tool_use_idx], gold_bboxes[idx])[overlap_metric_idx]
+                        if len(overlap_metrics) < tool_use_idx + 1:
+                            overlap_metrics.append([overlap_metric])
+                        else:
+                            overlap_metrics[tool_use_idx].append(overlap_metric)
+
+                logger.info(f"after {overlap_metric_name} calculation: {overlap_metrics}")
+
+                for tool_use_idx in range(len(overlap_metrics)):
+                    if len(self.metrics[overlap_metric_name]) < tool_use_idx + 1:
+                        self.metrics[overlap_metric_name].append(overlap_metrics[tool_use_idx])
                     else:
-                        ious[tool_use_idx].append(iou)
-
-            logger.info(f"after iou calculation: ious: {ious}")
-
-            for tool_use_idx in range(len(ious)):
-                if len(self.metrics["ious"]) < tool_use_idx + 1:
-                    self.metrics["ious"].append(ious[tool_use_idx])
-                else:
-                    self.metrics["ious"][tool_use_idx] += ious[tool_use_idx]
+                        self.metrics[overlap_metric_name][tool_use_idx] += overlap_metrics[tool_use_idx]
         else:
             logger.info(f"Skipping iou calculation for samples where bboxes are not given")
 
@@ -488,7 +490,7 @@ def evaluation_process(model_path, model_class, output_path:str, tensor_parallel
         save_path=output_path,
         vllm_client=llm_engine,
         metrics=["accuracy", "tool_use", "attempted_tool_use", "query", "solution",
-                 "model_answer", "model_answer_tokenized", "images", "image_sizes", "completion_len", "ious"]
+                 "model_answer", "model_answer_tokenized", "images", "image_sizes", "completion_len", "ious", "precision", "recall"],
     )
     
     t0 = time.time()
