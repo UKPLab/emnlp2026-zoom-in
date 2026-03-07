@@ -18,7 +18,7 @@ CONSECUTIVE_FREE_REQUIRED=2
 
 # Training command to run once GPUs are free enough.
 # Put your actual command here.
-TRAIN_CMD=(python train_scheduler.py)
+TRAIN_CMD=(python train_scheduler.py --shell_idx=2)
 
 # Where to write logs/state
 WORKDIR="/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/poor_mans_scheduler/gpu_waiter"

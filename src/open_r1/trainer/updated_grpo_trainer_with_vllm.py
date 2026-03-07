@@ -1352,7 +1352,8 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                             iou_target=iou_target,
                             tool_turn_selection=self.mi_mode["tool_turn_selection"],
                             negative_bboxes=negative_bboxes,
-                            same_digit_number=self.mi_mode["same_digit_number"]
+                            same_digit_number=self.mi_mode["same_digit_number"],
+                            overlap_metric=self.mi_mode["overlap_metric"]
                         )
                         negative_bboxes.append(new_bboxes)
                         if self.mi_mode["alternative_action"] == "alternative_tool_call":

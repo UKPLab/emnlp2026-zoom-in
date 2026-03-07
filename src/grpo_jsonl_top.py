@@ -339,6 +339,13 @@ class GRPOScriptArguments(ScriptArguments):
         }
     )
 
+    mi_overlap_metric: Optional[str] = field(
+        default="iou",
+        metadata={
+            "help": "type of overlap metric for the alternative tool call. 'iou' or 'recall'"
+        }
+    )
+
     #mi_short_bridge: Optional[str] = field(
     #    default=None,
     #    metadata={
@@ -711,7 +718,8 @@ def main(script_args, training_args, model_args):
                 "tool_turn_selection": script_args.mi_tool_turn_selection,
                 "num_negatives": script_args.mi_num_negatives,
                 "multi_negative_mode": script_args.mi_multi_negative_mode,
-                "same_digit_number": script_args.mi_same_digit_number
+                "same_digit_number": script_args.mi_same_digit_number,
+                "overlap_metric": script_args.mi_overlap_metric
     }
 
 

@@ -3,10 +3,11 @@ from aim import Repo
 import numpy as np
 
 repo = Repo("/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/")              # path to your .aim repo (often ".")
-run = repo.get_run("bd4d1bf4cff1423d95851e34")
+run = repo.get_run("0116dcd95a4d48be9474c8ec")
 #ours: 0f56e1861e134ecb87759ef6
 # cold absolute: 0833ae641bed4f3bba6b8c5d
 # no tool 3 epochs: bd4d1bf4cff1423d95851e34
+# no tool 1 epoch: 0116dcd95a4d48be9474c8ec
 
 # If you used contexts when tracking, you may need to pass the same context.
 # Otherwise omit context.

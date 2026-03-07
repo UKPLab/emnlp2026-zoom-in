@@ -119,18 +119,27 @@ def _clamp01(v: float) -> float:
     return min(max(0.0, v), 1.0)
 
 
-def _iou_i(a: BoxI, b: BoxI) -> float:
-    ix1 = max(a.x1, b.x1)
-    iy1 = max(a.y1, b.y1)
-    ix2 = min(a.x2, b.x2)
-    iy2 = min(a.y2, b.y2)
+def _iou_i(ref: BoxI, cand: BoxI, metric="iou") -> float:
+    ix1 = max(ref.x1, cand.x1)
+    iy1 = max(ref.y1, cand.y1)
+    ix2 = min(ref.x2, cand.x2)
+    iy2 = min(ref.y2, cand.y2)
     iw = max(0, ix2 - ix1)
     ih = max(0, iy2 - iy1)
     inter = iw * ih
     if inter == 0:
         return 0.0
-    union = a.area + b.area - inter
-    return inter / union if union > 0 else 0.0
+    union = ref.area + cand.area - inter
+
+    if metric == "iou":
+        overlap = inter / union if union > 0 else 0.0
+    elif metric == "recall":
+        overlap = inter / ref.area if ref.area > 0 else 0.0
+    else:
+        raise ValueError(f"Unknown metric: {metric}")
+    return overlap
+
+
 
 
 def _infer_mode(bbox_2d: BBoxIn, bbox_type: Optional[str]) -> str:
@@ -403,6 +412,7 @@ def _propose_box_free_floating_iou0(
     img_w: int,
     img_h: int,
     min_side: int,
+    overlap_metric: str = "iou"
 ) -> Optional[BoxI]:
     """
     For target_iou == 0: sample a box uniformly in the image (free-floating),
@@ -429,7 +439,7 @@ def _propose_box_free_floating_iou0(
         x1 = rng.randrange(0, max(1, img_w - w2 + 1))
         y1 = rng.randrange(0, max(1, img_h - h2 + 1))
         cand = BoxI(x1, y1, x1 + w2, y1 + h2)
-        if _iou_i(ref, cand) == 0.0:
+        if _iou_i(ref, cand, metric=overlap_metric) == 0.0:
             return cand
 
     # If we couldn't find a perfectly disjoint one quickly, return a random box anyway;
@@ -460,6 +470,7 @@ def generate_bbox_2d_new_close_iou_targeted(
     seed: Optional[int] = None,
     return_debug: bool = False,
     same_digit_number: bool = False, # if true, enforces that the number of digits for all 4 pixels in bbox_2d and bbox_2d_new are the same
+    overlap_metric: str = "iou"
 ) -> Union[BBoxOut, Tuple[BBoxOut, dict]]:
     """
     Target-aware proposal + rejection sampling to get realized IoU close to target_iou.
@@ -546,8 +557,8 @@ def generate_bbox_2d_new_close_iou_targeted(
                 "ref_pixel_box": ref_pix,
                 "new_pixel_box_simulated": cand_pix,
                 "target_iou": target_iou,
-                "simulated_iou": _iou_i(ref_pix, cand_pix),
-                "abs_error": abs(_iou_i(ref_pix, cand_pix) - target_iou),
+                "simulated_iou": _iou_i(ref_pix, cand_pix, metric=overlap_metric),
+                "abs_error": abs(_iou_i(ref_pix, cand_pix, metric=overlap_metric) - target_iou),
                 "note": "edge-case path: target_iou=0 and ref is full image",
             }
             return bbox_new, dbg
@@ -587,7 +598,7 @@ def generate_bbox_2d_new_close_iou_targeted(
             input_h=float(input_h),
         )
         cand_sim_pix = _pixel_box_from_norm(cand_sim_final, img_w, img_h)
-        iou_sim = _iou_i(ref_pix, cand_sim_pix)
+        iou_sim = _iou_i(ref_pix, cand_sim_pix, metric=overlap_metric)
         err = abs(iou_sim - target_iou)
 
         is_digit_number_valid = True
@@ -627,8 +638,8 @@ def generate_bbox_2d_new_close_iou_targeted(
         if err <= tol:
             if other_bboxes is not None and len(other_bboxes) > 0:
                 for other_bbox in other_bboxes_boxI:
-                    print(f"iou to previous: {_iou_i(other_bbox, cand_sim_pix)}")
-                    if _iou_i(other_bbox, cand_sim_pix) > other_bbox_threshold:
+                    print(f"iou to previous: {_iou_i(other_bbox, cand_sim_pix, metric=overlap_metric)}")
+                    if _iou_i(other_bbox, cand_sim_pix, metric=overlap_metric) > other_bbox_threshold:
                         too_close_to_previous = True
             print(f"too close to previous: {too_close_to_previous}")
             if not too_close_to_previous and is_digit_number_valid:

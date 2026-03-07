@@ -28,6 +28,11 @@ def get_results(path:str, metrics: list[str], is_verl=False):
         try:
             if metric == "accuracy":
                 result[metric] = np.mean(np.array(data["accuracy"]))*100
+            if metric.startswith("accuracy@"):
+                thresh = int(metric.removeprefix("accuracy@"))
+                conditional = np.array(data["accuracy"]) * (np.array(data["tool_use"]) <= thresh)
+                result[metric] = np.mean(conditional)*100
+
             if metric == "no_answer":
                 result[metric] = np.mean(np.array(data["no_answer"]))*100
             if metric == "avg_pixel_reasoning":

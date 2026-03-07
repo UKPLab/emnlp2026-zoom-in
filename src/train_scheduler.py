@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import os
 import subprocess
 import time
@@ -262,6 +263,12 @@ def get_commands(hparams: dict, run_name: str, available_gpus=None, reuse_vllm=F
     return vllm_cmd, hf_cmd, output_dir, vllm_port_offset
 
 if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(description='Evaluate VLM model performance')
+    parser.add_argument('--shell_idx', type=int, default=None, help='which shell to run training on')
+    parser.add_argument('--dry_run', action='store_true', help='dry run, do not actually run training')
+    args = parser.parse_args()
+
     # Register signal handler for graceful exit
     signal.signal(signal.SIGINT, signal_handler)
 
@@ -293,14 +300,14 @@ if __name__ == "__main__":
             "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_15.json",
             "shell_number": 1,
             "path": "",
-            "state": "running"
+            "state": "wait"
         },
 
         {
             "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_20.json",
             "shell_number": 2,
             "path": "",
-            "state": "to_be_launched"
+            "state": "running"
         },
 
         {
@@ -310,31 +317,49 @@ if __name__ == "__main__":
             "state": "wait"
         },
 
-
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_chkps.json",
+            "shell_number": 3,
+            "path": "",
+            "state": "to_be_launched"
+        },
+        {
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_sample_recall.json",
+            "shell_number": 2,
+            "path": "",
+            "state": "to_be_launched"
+        },
     ]
 
     for run in runs:
         if run["state"] == "to_be_launched":
-            vllm_screen_name = f"{run['shell_number']}_auto_vllm"
-            train_screen_name = f"{run['shell_number']}_auto_run"
+            if args.shell_idx is None or run["shell_number"] == args.shell_idx:
+                if args.dry_run:
+                    print(f"dry run, do nothing: {run}")
+                    continue
+                else:
+                    vllm_screen_name = f"{run['shell_number']}_auto_vllm_2"
+                    train_screen_name = f"{run['shell_number']}_auto_run_2"
 
-            available_gpus = None #, "2", "3", "4"]
-            reuse_vllm = True
-            ignore_vllm = False
-            keep_vllm_alive = False
+                    available_gpus = None #, "2", "3", "4"]
+                    reuse_vllm = True
+                    ignore_vllm = False
+                    keep_vllm_alive = False
 
-            # Run the training pipeline
-            current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    # Run the training pipeline
+                    current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-            full_hparams = json.load(open(os.path.join(script_dir, run["json_name"]), "r"))
+                    full_hparams = json.load(open(os.path.join(script_dir, run["json_name"]), "r"))
 
-            run_name = run["json_name"].removesuffix(".json")
+                    run_name = run["json_name"].removesuffix(".json")
 
-            vllm_command, train_command, output_dir, vllm_port_offset = get_commands(full_hparams, run_name, available_gpus, reuse_vllm, ignore_vllm)
-            print(f"starting run: {run_name}")
-            print(f"vllm_command: {vllm_command}")
-            print(f"hf_command: {train_command}")
+                    vllm_command, train_command, output_dir, vllm_port_offset = get_commands(full_hparams, run_name, available_gpus, reuse_vllm, ignore_vllm)
+                    print(f"starting run: {run_name}")
+                    print(f"vllm_command: {vllm_command}")
+                    print(f"hf_command: {train_command}")
 
-            run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, train_command, output_dir=output_dir,
-                                  ignore_vllm=ignore_vllm, keep_vllm_alive=keep_vllm_alive,
-                                  available_gpus=available_gpus)
+                    run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, train_command, output_dir=output_dir,
+                                          ignore_vllm=ignore_vllm, keep_vllm_alive=keep_vllm_alive,
+                                          available_gpus=available_gpus)
+            else:
+                print(f"Wrong shell idx for run: {run}")

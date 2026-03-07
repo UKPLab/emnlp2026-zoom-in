@@ -370,6 +370,7 @@ class Tool:
 
         negative_bboxes = generate_and_use_new_bbox["negative_bboxes"] if generate_and_use_new_bbox is not None and "negative_bboxes" in generate_and_use_new_bbox.keys() else None
         same_digit_number = generate_and_use_new_bbox["same_digit_number"] if generate_and_use_new_bbox is not None and "same_digit_number" in generate_and_use_new_bbox.keys() else False
+        overlap_metric = generate_and_use_new_bbox["overlap_metric"] if generate_and_use_new_bbox is not None and "overlap_metric" in generate_and_use_new_bbox.keys() else "iou"
 
         new_bbox = None
         absolute_bbox_wrt_target_coords = None
@@ -381,7 +382,8 @@ class Tool:
                                                     max_tries=100,
                                                     target_iou=generate_and_use_new_bbox["iou_target"],
                                                     other_bboxes=negative_bboxes,
-                                                    same_digit_number=same_digit_number
+                                                    same_digit_number=same_digit_number,
+                                                    overlap_metric=overlap_metric
                                                     )
             actual_tool_args["bbox_2d"] = new_bbox
             tool_args["bbox_2d"] = new_bbox
