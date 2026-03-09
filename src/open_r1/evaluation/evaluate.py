@@ -117,14 +117,24 @@ class VLLM:
                 img_sizes.append(img_size)
 
             logger.info(f"directly before vllm generate")
+            logger.info(f"sampling_params: {sampling_params}")
             logger.info(f"inputs_with_image: {inputs_with_image}")
             all_outputs = self.llm.generate(inputs_with_image, sampling_params=sampling_params)
 
             logger.info(f"after vllm generate")
             #logger.info(f"{all_outputs[0].outputs[0].text}")
-            only_text = [output.outputs[0].text for output in all_outputs]
-            completion_len = [len(output.outputs[0].token_ids) for output in all_outputs]
-            only_tokens = [output.outputs[0].token_ids for output in all_outputs]
+            # TODO: use nested loop instead of only [0]
+            only_text = []
+            completion_len = []
+            only_tokens = []
+            for output in all_outputs:
+                for sample in output.outputs:
+                    only_text.append(sample.text)
+                    completion_len.append(len(sample.token_ids))
+                    only_tokens.append(sample.token_ids)
+            #only_text = [output.outputs[0].text for output in all_outputs]
+            #completion_len = [len(output.outputs[0].token_ids) for output in all_outputs]
+            #only_tokens = [output.outputs[0].token_ids for output in all_outputs]
 
             # Explicit cleanup
             del inputs_with_image
@@ -153,11 +163,13 @@ class VLLM:
 class Evaluator:
 
     def __init__(self, vlm_module, processing_class, vllm_client, sampling_params:SamplingParams,
+                 num_generations:int,
                  multi_turn, max_tool_uses, strict_tool_extraction, save_path, metrics):
         self.vlm_module = vlm_module
         self.processing_class = processing_class
         self.vllm_client = vllm_client
         self.sampling_params=sampling_params
+        self.num_generations=num_generations
         self.multi_turn = multi_turn
         self.max_tool_uses = max_tool_uses
         self.strict_tool_extraction = strict_tool_extraction
@@ -187,6 +199,7 @@ class Evaluator:
             collate_fn=lambda x: x
         )
         self.metrics = {metric: [] for metric in self.metrics.keys()}
+        logger.info(f"in evaluate: len(dataloader): {len(dataloader)}")
         batch_no = 0
         for batch in dataloader:
             logger.info(f"batch: {batch_no}/{len(dataloader)}")
@@ -238,7 +251,9 @@ class Evaluator:
 
         history = inputs.copy()
 
-        prompts = [x["prompt"] for x in inputs]
+        logger.info(f"in _generate_and_score_completions: len(inputs): {len(inputs)}")
+
+        #prompts = [x["prompt"] for x in inputs]
 
         tool_list = [tool.get_tool_dict() for tool in tools] if tools is not None else None
 
@@ -253,28 +268,52 @@ class Evaluator:
                 raise ValueError(f"sample {x} does not contain any image path")
 
         # Generate completions using vLLM: gather all prompts and use them in a single call in the main process
-        all_histories = history
-        all_image_paths = image_paths
+        all_histories = []
+        solutions = []
+        prompts = []
+        accu_rewards = []
+
+        has_bboxes = "bbox" in inputs[0].keys()
+        gold_bboxes = []
+
+        for h in history:
+            for _ in range(self.num_generations):
+                all_histories.append(copy.deepcopy(h))
+                solutions.append(h["solution"])
+                prompts.append(h["prompt"])
+                accu_rewards.append(h["accu_reward_method"])
+                if has_bboxes:
+                    gold_bboxes.append(h["bbox"])
+
+        reward_kwargs = {"accu_reward_method": accu_rewards}
+
+        all_image_paths = []
+        for i in image_paths:
+            for _ in range(self.num_generations):
+                all_image_paths.append(copy.deepcopy(i))
 
         no_conversations = len(all_histories)
 
         multi_turn_manager = MultiTurn(no_conversations,
                                        processor=self.processing_class,
                                        tools=tools)
-
+        logger.info(f"multi turn manager batch size: {multi_turn_manager.batch_size}")
         multi_turn_manager.add_initial_user_prompt([h["prompt"][0] for h in all_histories], all_image_paths)
+        logger.info(f"self.num_generations before get_sequences: {self.num_generations}")
         full_token_seq = multi_turn_manager.get_sequences(type="id", add_assistant_start=True,
-                                                          full_image_pad=False)
+                                                          full_image_pad=False)#[::self.num_generations]
+
         input_text = multi_turn_manager.get_sequences(type="text", add_assistant_start=True, full_image_pad=False)
         self.metrics["query"] += input_text
+        input_text = input_text[::self.num_generations]
 
         logger.info(f"input text before generation: {input_text}")
 
         all_multimodal_token_inputs = [{"prompt_token_ids": full_token_seq[i],
                                         "image_path": all_image_paths[i]}
-                                       for i in range(len(all_image_paths))]
+                                       for i in range(0, len(all_image_paths), self.num_generations)]
 
-        logger.info(f"all_multimodal_token_inputs: {all_multimodal_token_inputs}")
+        #logger.info(f"all_multimodal_token_inputs: {all_multimodal_token_inputs}")
 
         max_generation_attempts = 5
         conv_round = 0
@@ -285,8 +324,17 @@ class Evaluator:
             attempts = 0
             while (not vllm_generation_has_worked) and (attempts <= max_generation_attempts):
                 try:
+                    logger.info(f"before num_gen change: conv round {conv_round}, sampling_params: {self.sampling_params}")
+                    if conv_round == 0:
+                        sampling_params = self.sampling_params
+                        sampling_params.n = self.num_generations
+                    else:
+                        sampling_params = self.sampling_params
+                        sampling_params.n = 1
+
+                    logger.info(f"after num_gen change: sampling params: {sampling_params}")
                     completion_ids_token_based = self.vllm_client.generate(prompts=all_multimodal_token_inputs,
-                                                                           sampling_params=self.sampling_params)
+                                                                           sampling_params=sampling_params)
                     vllm_generation_has_worked = True
                 except Exception as e:
                     logger.info(f"Generation {attempts} failed with exception:", e)
@@ -296,7 +344,7 @@ class Evaluator:
                         logger.info(f"vLLM server is up!")
                     except ConnectionError:
                         raise ConnectionError("vLLM Server is down, aborting training.")
-
+            logger.info(f"len of vllm generation: {len(completion_ids_token_based)}")
             completions_token_based = self.processing_class.batch_decode(completion_ids_token_based,skip_special_tokens=True)
             logger.info(f"completions from conv round {conv_round}: {completions_token_based}")
 
@@ -328,7 +376,8 @@ class Evaluator:
                 else:
                     multi_turn_manager.is_finished = [True for _ in range(no_conversations)]
             elif self.multi_turn == "tool":
-
+                #logger.info(f"before handle tool call.. sleep")
+                #time.sleep(100)
                 multi_turn_manager.handle_tool_call(save_path=os.path.join(self.save_path, "tool_calls"),
                                                     step=0, strict_extraction=self.strict_tool_extraction,
                                                     finish_after_wrong_tool_call=False)
@@ -366,7 +415,7 @@ class Evaluator:
             bboxes = multi_turn_manager.get_absolute_bboxes(flatten=False)
             logger.info(f"bboxes: {bboxes}")
 
-            gold_bboxes = [x['bbox'] for x in inputs]
+
             logger.info(f"gold_bboxes: {gold_bboxes}")
 
             overlap_metric_names = ["ious", "precision", "recall"]
@@ -410,8 +459,8 @@ class Evaluator:
         if is_conversational(inputs[0]):
             completions = [[{"role": "assistant", "content": completion}] for completion in completions]
 
-        reward_kwargs = {"accu_reward_method": [x["accu_reward_method"] for x in inputs]}
-        solutions = [x['solution'] for x in inputs]
+
+        #solutions = [x['solution'] for x in inputs]
 
         accuracies = accuracy_reward(prompts=prompts, completions=completions,
                                              solution = solutions,
@@ -430,6 +479,8 @@ def evaluation_process(model_path, model_class, output_path:str, tensor_parallel
                        strict_tool_extraction: bool,
                        dataset:dict, prompt_type: str,
                        max_tokens_per_reply: int,
+                       temperature: float = 0.0,
+                       num_generations: int=1,
                        batch_size:int=1000, no_vllm:bool=False,
                        enforce_eager:bool=False,
                        tool_args:list[dict]=None,
@@ -449,6 +500,8 @@ def evaluation_process(model_path, model_class, output_path:str, tensor_parallel
                               tool_hparams=tool_arg["tool_hparams"]))
 
     logger.info(f"tools: {tools}")
+
+    logger.info(f"batch size in evaluation_process: {batch_size}")
 
     processing_class = AutoProcessor.from_pretrained(model_class)
     processing_class.chat_template = json.load(open("qwen_chat_template_tool.json", "r"))["chat_template"]
@@ -471,19 +524,20 @@ def evaluation_process(model_path, model_class, output_path:str, tensor_parallel
 
     # Sampling parameters
     sampling_params = SamplingParams(
-        n=1,
-        temperature=0.0,
+        n=num_generations,
+        temperature=temperature,
         top_p=1.0,
         top_k=-1,
         min_p=0.0,
         max_tokens=max_tokens_per_reply,
         stop_token_ids=[151643, 151658]
     )
-
+    logger.info(f"before initiating evaluator: num_generations: {num_generations}")
     evaluator = Evaluator(
         vlm_module=Qwen2VLModule,
         processing_class=processing_class,
         sampling_params=sampling_params,
+        num_generations=num_generations,
         multi_turn="tool",
         max_tool_uses=max_tool_uses,
         strict_tool_extraction=strict_tool_extraction,
@@ -526,7 +580,8 @@ if __name__ == "__main__":
     parser.add_argument('--tool_padding', type=float, default=0.1, help='ratio how much the tool bbox should be increased')
     parser.add_argument('--tool_adaptive_padding_threshold', type=int, default=None, help='upper bound (in px) of tool use padding')
     parser.add_argument('--max_tokens_per_reply', type=int, default=256, help='Maximum number of tokens per reply')
-
+    parser.add_argument('--temperature', type=float, default=0.0, help='sampling with temperature, 0.0 is greedy')
+    parser.add_argument('--num_generations', type=int, default=1, help='How many generations. Value > 1 is only meaningful for temperature > 0')
 
     args = parser.parse_args()
 
@@ -571,6 +626,10 @@ if __name__ == "__main__":
     if mm_processor_kwargs == {}:
         mm_processor_kwargs = None
 
+
+
+    batch_size = args.batch_size // args.num_generations
+
     evaluation_process(
         args.model_path,
         args.model_class,
@@ -582,7 +641,9 @@ if __name__ == "__main__":
         dataset,
         args.prompt_type,
         args.max_tokens_per_reply,
-        args.batch_size,
+        args.temperature,
+        args.num_generations,
+        batch_size,
         args.no_vllm,
         args.enforce_eager,
         tool_configs,

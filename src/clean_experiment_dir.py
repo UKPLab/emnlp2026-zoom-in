@@ -66,12 +66,14 @@ class Options:
     enable_reduce: bool
 
     enable_move: bool
+    enable_move_within_42: Optional[str]
     remote_host: Optional[str]
     remote_port: int
     remote_user: Optional[str]
     remote_password: Optional[str]
     remote_base_dir: Optional[str]
     ignore_dirs: Optional[Union[list[str], datetime.date]]
+    only_use_dirs: Optional[Union[list[str], datetime.date]]
 
     enable_delete_tool_calls: bool
 
@@ -312,6 +314,16 @@ def count_local_entries(path: Path) -> int:
     except OSError:
         return 0
 
+def action_move_within_42(opts: Options, exp_dir:Path) -> None:
+    if not os.path.exists(opts.enable_move_within_42):
+        do_print(opts, f"target path {opts.enable_move_within_42} does not exist in 42, creating it")
+        if not opts.dry_run:
+            os.makedirs(opts.enable_move_within_42)
+    if not opts.dry_run:
+        do_print(opts, f"moving now!")
+        shutil.move(exp_dir, opts.enable_move_within_42)
+
+
 
 def action_delete_tool_calls(opts: Options, remote: RemoteOps, exp_dir: Path) -> None:
     assert opts.remote_base_dir is not None, "remote_base_dir must be set for delete_tool_calls action"
@@ -354,7 +366,7 @@ def parse_args() -> Options:
                    help='Delete experiment dir if it has no subdir starting with "checkpoint-"')
     p.add_argument("--reduce", action="store_true",
                    help='Reduce checkpoints when "checkpoint-382*" exists among multiple checkpoints')
-
+    p.add_argument("--move-within-42-to", default=None, help="move experiments to another 42 dir")
     p.add_argument("--move", action="store_true", help="Copy experiment dirs to remote via SSH/SFTP")
     p.add_argument("--delete-tool-calls", action="store_true",
                    help="Delete local tool_calls if same entry count exists on remote")
@@ -364,23 +376,36 @@ def parse_args() -> Options:
     p.add_argument("--remote-user", default="helm",help="Remote username for SSH")
     p.add_argument("--remote-password", default="1980EintrachtFrankfurtOle\\", help="Remote password for SSH")
     p.add_argument("--remote-base-dir", default="/mnt/beegfs/work/helm/42_data_dump/focusreason/runs", help="Remote base directory to copy into / compare against")
-    p.add_argument("--ignore-dirs", default=None, help="How to choose which dirs to ignore")
 
-
+    p.add_argument("--ignore-dirs", default=None, help="How to choose which dirs to ignore (opt-out)")
+    p.add_argument("--only-use-dirs", default=None, help="How to choose which dirs to use (opt-in)")
 
 
     args = p.parse_args()
 
     ignore_dirs = []
-    if args.ignore_dirs == "custom":
+    if args.ignore_dirs is None:
+        ignore_dirs = []
+    elif args.ignore_dirs == "custom":
         ignore_dirs = ["Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_continue_pr_20260216_164341",
                        "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_conditional_constant_tool_1p0_20260216_164025",
                        "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_padding_0p05_20260216_164701"]
     elif args.ignore_dirs.startswith("after:"):
         ignore_dirs = datetime.datetime.strptime(args.ignore_dirs.split(":")[1], "%Y%m%d").date()
 
+    only_use_dirs = None
+    print(f"only_use_dirs: {args.only_use_dirs}")
+    #sys.exit()
+    if args.only_use_dirs == "custom":
+        only_use_dirs = ["Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_continue_pr_20260216_164341",
+                       "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_conditional_constant_tool_1p0_20260216_164025",
+                       "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_padding_0p05_20260216_164701"]
+    elif args.only_use_dirs.startswith("before:"):
+        only_use_dirs = datetime.datetime.strptime(args.only_use_dirs.split(":")[1], "%Y%m%d").date()
+
 
     print(f"ignore dirs: {ignore_dirs}")
+    print(f"only use dirs: {only_use_dirs}")
 
     return Options(
         parent=Path(args.parent),
@@ -390,12 +415,14 @@ def parse_args() -> Options:
         enable_reduce=args.reduce,
 
         enable_move=args.move,
+        enable_move_within_42=args.move_within_42_to,
         remote_host=args.remote_host,
         remote_port=args.remote_port,
         remote_user=args.remote_user,
         remote_password=args.remote_password,
         remote_base_dir=args.remote_base_dir,
         ignore_dirs=ignore_dirs,
+        only_use_dirs=only_use_dirs,
 
         enable_delete_tool_calls=args.delete_tool_calls,
     )
@@ -423,6 +450,23 @@ def loop_action(opts: Options, action:Callable):
     for exp_dir in exp_dirs:
         print(f"exp dir name: {exp_dir.name}")
 
+        if isinstance(opts.only_use_dirs, list):
+            if exp_dir.name not in opts.only_use_dirs:
+                print(f"{exp_dir.name} not in only_use_dirs list {opts.only_use_dirs}, skipping")
+                continue
+        elif isinstance(opts.only_use_dirs, datetime.date):
+            try:
+                runtime = datetime.datetime.strptime(exp_dir.name.split("_")[-2], "%Y%m%d").date()
+
+                if runtime > opts.only_use_dirs:
+                    print(f"{exp_dir.name} too new for only_use_dirs threshold, skipping")
+                    continue
+            except ValueError:
+                print(f"cannot parse date from {exp_dir.name}, skipping")
+                continue
+
+
+
         if isinstance(opts.ignore_dirs, list):
             if exp_dir.name in opts.ignore_dirs:
                 print(f"ignoring {exp_dir.name}")
@@ -432,7 +476,7 @@ def loop_action(opts: Options, action:Callable):
                 runtime = datetime.datetime.strptime(exp_dir.name.split("_")[-2], "%Y%m%d").date()
 
                 if runtime > opts.ignore_dirs:
-                    print(f"ignoring {exp_dir.name}")
+                    print(f"ignoring {exp_dir.name}, too new")
                     continue
             except ValueError:
                 print(f"cannot parse date from {exp_dir.name}")
@@ -459,9 +503,14 @@ def main() -> int:
         if opts.enable_delete_empty_exp:
             loop_action(opts, action_delete_empty_exp)
 
+
+
         # 2) reduce
         if opts.enable_reduce:
             loop_action(opts, action_reduce)
+
+        if opts.enable_move_within_42 is not None:
+            loop_action(opts, action_move_within_42)
 
         # 3) move
         if opts.enable_move and remote is not None:

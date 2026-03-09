@@ -4,17 +4,26 @@ if __name__ == '__main__':
     node = 5
 
     mapping_list = [
-
-        {
-            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_sample_recall_20260302_042226",
-                "gpu": 2
+                {
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_20260123_184044",
+                "gpu": 0
         },
-        #{
-        #    "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_15_20260301_145725",
-        #    "gpu": 4
-        #},
-
-
+        {
+            "model_path": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "gpu": 1
+        },
+        {
+            "model_path": "TIGER-Lab/PixelReasoner-RL-v1",
+            "gpu": 2
+        },
+        {
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool_20260227_014456",
+            "gpu": 3
+        },
+        {
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_20260120_224520",
+            "gpu": 4
+        },
     ]
 
     for mapping in mapping_list:

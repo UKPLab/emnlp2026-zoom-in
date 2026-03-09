@@ -1631,6 +1631,20 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                             contrast_diff_list.append(None)
                             continue
 
+                        upcast = "fp32"
+
+                        if upcast is not None:
+                            if upcast == "fp32":
+                                higher_precision = torch.float32
+                            elif upcast == "fp64":
+                                higher_precision = torch.float64
+
+                            original_precision = positives_list[negative_rollout_id].dtype
+
+                            positives_list[negative_rollout_id].to(higher_precision)
+                            for negative_sample_id in range(len(negatives_list)):
+                                negatives_list[negative_sample_id][negative_rollout_id].to(higher_precision)
+
                         for negative_sample_id in range(len(negatives_list)):
                             if negative_sample_id == 0:
                                 if self.mi_mode["use_info_nce"]:
@@ -1643,6 +1657,12 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
                                 contrast_diff_nom = torch.logaddexp(contrast_diff_nom, positives_list[negative_rollout_id])
                                 contrast_diff_denom = torch.logaddexp(contrast_diff_denom, negatives_list[negative_sample_id][negative_rollout_id])
                         contrast_diff = contrast_diff_nom - contrast_diff_denom
+
+                        if upcast is not None:
+                            positives_list[negative_rollout_id].to(original_precision)
+                            for negative_sample_id in range(len(negatives_list)):
+                                negatives_list[negative_sample_id][negative_rollout_id].to(original_precision)
+
 
                         contrast_diff_list.append(contrast_diff.detach())
 

@@ -61,10 +61,12 @@ class DatasetParams:
                 img_path = ""
             self.data_files = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/pixel_reasoner/eval/V_Star/{task}"
             self.image_folders = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/pixel_reasoner/eval/V_Star{img_path}"
+            self.default_num_generations = 32
 
         elif self.dataset_name == "pixel_reasoner_infovqa":
             self.data_files = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/pixel_reasoner/eval/Infographics_VQA/test.jsonl"
             self.image_folders = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/pixel_reasoner/eval/Infographics_VQA"
+            self.default_num_generations = 2
         elif self.dataset_name == "hr_bench_4k":
             if verl_eval:
                 task = "test_verl.json"
@@ -72,6 +74,7 @@ class DatasetParams:
                 task = "test.jsonl"
             self.data_files = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/HR_Bench_4k/{task}"
             self.image_folders = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/HR_Bench_4k/images"
+            self.default_num_generations = 8
         elif self.dataset_name == "hr_bench_8k":
             if verl_eval:
                 task = "test_verl.json"
@@ -79,6 +82,7 @@ class DatasetParams:
                 task = "test.jsonl"
             self.data_files = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/HR_Bench_8k/{task}"
             self.image_folders = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/HR_Bench_8k/images"
+            self.default_num_generations = 8
         elif self.dataset_name == "mme":
             if verl_eval:
                 task = "test_verl.json"
@@ -86,6 +90,7 @@ class DatasetParams:
                 task = "test.jsonl"
             self.data_files = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/MME-RealWorld/{task}"
             self.image_folders = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/MME-RealWorld/images"
+            self.default_num_generations = 1
         elif self.dataset_name == "mme_lite":
             self.data_files = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/MME-RealWorld-lite/test.jsonl"
             self.image_folders = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/MME-RealWorld-lite/images"
@@ -102,6 +107,7 @@ class DatasetParams:
 
             self.data_files = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/muffin_chihuahua/grid/{dataset_name.removeprefix('muffin_chihuahua_')}/{task}"
             self.image_folders = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/muffin_chihuahua/grid/{dataset_name.removeprefix('muffin_chihuahua_')}/images"
+            self.default_num_generations = 4
         else:
             raise NotImplementedError(f"dataset {dataset_name} not implemented!")
 
@@ -111,7 +117,8 @@ class EvalParams:
     def __init__(self, batch_size=200, tensor_parallel_size=1, enforce_eager=True, no_vllm=False, dry_run=False,
                  min_pixels=None, max_pixels=None, tool_config_type = "no_tool", image_limit=6, max_tool_uses=5,
                  bbox_type=None, strict_tool_extraction=False,max_tokens_per_reply=256,
-                 tool_padding=0.1, tool_adaptive_padding_threshold=600, verl_eval:bool=False,**kwargs):
+                 tool_padding=0.1, tool_adaptive_padding_threshold=600, verl_eval:bool=False,
+                 temperature=0.0, num_generations=1, **kwargs):
         # technical
         self.batch_size = batch_size
         self.tensor_parallel_size = tensor_parallel_size
@@ -119,6 +126,8 @@ class EvalParams:
         self.no_vllm = no_vllm
         self.dry_run = dry_run
         self.verl_eval = verl_eval
+        self.temperature = temperature
+        self.num_generations = num_generations
 
         # outcome relevant
         if max_pixels is None:
@@ -156,6 +165,12 @@ class SingleEval:
         self.dataset_params = dataset_params
         self.eval_params = eval_params
 
+        if self.eval_params.temperature == 0:
+            self.eval_params_num_generations = 1
+        else:
+            if self.eval_params.num_generations == "dataset_dependent":
+                self.eval_params.num_generations = self.dataset_params.default_num_generations
+
 
     def get_command(self, save_path ):
 
@@ -183,8 +198,9 @@ class SingleEval:
                 '--strict_tool_extraction', f'{self.eval_params.strict_tool_extraction}',
                 '--tool_padding', f'{self.eval_params.tool_padding}',
                 '--tool_adaptive_padding_threshold', f'{self.eval_params.tool_adaptive_padding_threshold}',
-                '--max_tokens_per_reply', f'{self.eval_params.max_tokens_per_reply}'
-
+                '--max_tokens_per_reply', f'{self.eval_params.max_tokens_per_reply}',
+                '--num_generations', f'{self.eval_params.num_generations}',
+                '--temperature', f'{self.eval_params.temperature}'
             ]
             if self.eval_params.no_vllm:
                 cmd.append('--no_vllm')
@@ -228,7 +244,10 @@ class SingleEval:
         return cmd, working_directory
 
     def get_eval_name(self):
-        eval_name = f"{self.model_params.short_name}_{self.model_params.checkpoint}_{self.dataset_params.dataset_name}_{self.eval_params.tool_config_type}_{self.eval_params.max_pixels}_{self.eval_params.min_pixels}_{self.eval_params.tool_padding}"
+        if self.eval_params.temperature > 0:
+            eval_name = f"{self.model_params.short_name}_{self.model_params.checkpoint}_{self.dataset_params.dataset_name}_{self.eval_params.tool_config_type}_{self.eval_params.max_pixels}_{self.eval_params.min_pixels}_{self.eval_params.tool_padding}_{self.eval_params.temperature}_{self.eval_params.num_generations}"
+        else:
+            eval_name = f"{self.model_params.short_name}_{self.model_params.checkpoint}_{self.dataset_params.dataset_name}_{self.eval_params.tool_config_type}_{self.eval_params.max_pixels}_{self.eval_params.min_pixels}_{self.eval_params.tool_padding}"
         return eval_name
 
     def get_save_path(self, backward_comp_mode=False):
@@ -236,7 +255,11 @@ class SingleEval:
             save_path = os.path.join(self.model_params.full_output_path, self.model_params.dir_suffix,
                                      f"dataset_{self.dataset_params.dataset_name}_prompt_{self.eval_params.tool_config_type}_max_pixels_{self.eval_params.max_pixels}_min_pixels_{self.eval_params.min_pixels}")
         else:
-            save_path = os.path.join(self.model_params.full_output_path, self.model_params.dir_suffix,
+            if self.eval_params.temperature > 0:
+                save_path = os.path.join(self.model_params.full_output_path, self.model_params.dir_suffix,
+                                         f"dataset_{self.dataset_params.dataset_name}_prompt_{self.eval_params.tool_config_type}_max_pixels_{self.eval_params.max_pixels}_min_pixels_{self.eval_params.min_pixels}_padding_{self.eval_params.tool_padding}_temp_{self.eval_params.temperature}_samples_{self.eval_params.num_generations}")
+            else:
+                save_path = os.path.join(self.model_params.full_output_path, self.model_params.dir_suffix,
                                      f"dataset_{self.dataset_params.dataset_name}_prompt_{self.eval_params.tool_config_type}_max_pixels_{self.eval_params.max_pixels}_min_pixels_{self.eval_params.min_pixels}_padding_{self.eval_params.tool_padding}")
         return save_path
 
@@ -474,18 +497,25 @@ def get_models_input():
             "tool_config_type": ["no_tool", "zoom_in_absolute"],  # , "zoom_in_absolute"], #,"zoom_in_absolute",
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [500 * 28 * 28],
-            "dataset_name": [{"name": "muffin_chihuahua",
+            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa",
+                             {"name": "muffin_chihuahua",
                               "grid_pixels": [1, 2, 4, 8],
                               "gridsize": [1, 2, 4, 8, 16],
-                              "mode": ["single_cell_query", "find_outlier"]}
-                             # "hr_bench_4k", "hr_bench_8k", "mme_lite", "mme"
+                              "mode": ["single_cell_query", "find_outlier"]},
+                             "hr_bench_4k", "hr_bench_8k",
+                             #"mme_lite",
+                             "mme"
                              ],
             # ["hr_bench_4k", "hr_bench_8k", "mme_lite", "mme"], #["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
             'bbox_type': [None],
             'strict_tool_extraction': [False],
+            'tool_padding': [0.1],
             'max_tokens_per_reply': [1024],
+            'temperature': [1.0],
+            'num_generations': ["dataset_dependent"],
             "evaluate": False,
-            "analyze": False
+            "analyze": False,
+            "paper": True
         },
         {
             "short_name": "PixelReasoner_original_after_SFT",
@@ -517,17 +547,21 @@ def get_models_input():
                      1,
                      2, 4, 8, 16],
                  "mode": ["single_cell_query", "find_outlier"]
-                 }
-                # "hr_bench_4k", "hr_bench_8k", "mme_lite", "mme"
+                 },
+                "hr_bench_4k", "hr_bench_8k", "mme",  #"mme_lite"
+                "pixel_reasoner_infovqa"
             ],
-            # ["hr_bench_4k", "hr_bench_8k", "mme_lite", "mme"], #"pixel_reasoner_vstar"],#["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],#, "pixel_reasoner_infovqa"],
+            # ["hr_bench_4k", "hr_bench_8k", "mme_lite", "mme"], #"pixel_reasoner_vstar"],#["pixel_reasoner_vstar", ],#, "pixel_reasoner_infovqa"],
             'bbox_type': [None],
             'strict_tool_extraction': [False],
             'max_tokens_per_reply': [1024],
+            'temperature': [1.0],
+            'num_generations': ["dataset_dependent"],
             "max_pixels": [5120 * 28 * 28],
             "min_pixels": [512 * 28 * 28],
             "evaluate": False,
-            "analyze": False
+            "analyze": False,
+            "paper": True
         },
 
         {
@@ -2168,9 +2202,10 @@ def get_models_input():
             "checkpoint": [382],
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
             "tool_config_type": ["zoom_in_absolute"],  # , "no_tool"], #,
-            "dataset_name": [  # "pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
-                # "mme_lite", "mme",
-                # "pixel_reasoner_infovqa",
+            "dataset_name": [  "pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+                #"mme_lite",
+                               "mme",
+                "pixel_reasoner_infovqa",
                 {"name": "muffin_chihuahua",
                  "grid_pixels": [1, 2, 4, 8],
                  "gridsize": [1, 2,
@@ -2182,12 +2217,15 @@ def get_models_input():
             "min_pixels": [500 * 28 * 28],
             'bbox_type': ["absolute"],
             'strict_tool_extraction': [False],
-            'tool_padding': [0.1, 0.05, 0.0],
+            'tool_padding': [0.1], #, 0.05, 0.0
             'max_tokens_per_reply': [1024],
+            'temperature': [1.0],
+            'num_generations': ["dataset_dependent"],
             "evaluate": False,
             "analyze": False,  # later+
             "contains_full_chkp": True,
-            "run_finished": False
+            "run_finished": False,
+            "paper": True
         },
         {
             "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_long_warmup",
@@ -2291,28 +2329,32 @@ def get_models_input():
             "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_20260123_184044",
             "checkpoint": [382],
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
-            "tool_config_type": ["zoom_in_absolute"],  # , "no_tool"], #,
-            "dataset_name": [  # "pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+            "tool_config_type": ["zoom_in_absolute", "no_tool"],  # , "no_tool"], #,
+            "dataset_name": [  "pixel_reasoner_vstar",
+                "hr_bench_4k", "hr_bench_8k",
                 # "mme_lite",
-                # "pixel_reasoner_infovqa",
+                "pixel_reasoner_infovqa",
                 {"name": "muffin_chihuahua",
                  "grid_pixels": [1, 2, 4, 8],
                  "gridsize": [1, 2,
                               4, 8, 16
                               ],
                  "mode": ["single_cell_query", "find_outlier"]},
-                # "mme"
+                 "mme"
             ],
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [500 * 28 * 28],
             'bbox_type': ["absolute"],
             'strict_tool_extraction': [False],
             'max_tokens_per_reply': [1024],
-            'tool_padding': [0.1, 0.05, 0.0],
+            'tool_padding': [0.1],#, 0.05, 0.0],
+            'temperature': [1.0],
+            'num_generations': ["dataset_dependent"],
             "evaluate": False,
             "analyze": False,  # later+
             "contains_full_chkp": True,
-            "run_finished": False
+            "run_finished": False,
+            "paper": True
         },
         {
             "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_no_tanh",
@@ -2954,14 +2996,14 @@ def get_models_input():
             "checkpoint": [382],
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
             "tool_config_type": ["no_tool", "zoom_in_absolute"],  # , "no_tool"],
-            "dataset_name": [  # "pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
-                #"mme",
+            "dataset_name": [  "pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+                "mme",
                 # "mme_lite",
                 "pixel_reasoner_infovqa",
-                #{"name": "muffin_chihuahua",
-                # "grid_pixels": [1, 2, 4, 8],
-                # "gridsize": [1, 2, 4, 8, 16],
-                # "mode": ["single_cell_query", "find_outlier"]}
+                {"name": "muffin_chihuahua",
+                 "grid_pixels": [1, 2, 4, 8],
+                 "gridsize": [1, 2, 4, 8, 16],
+                 "mode": ["single_cell_query", "find_outlier"]}
             ],
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [500 * 28 * 28],
@@ -2969,10 +3011,13 @@ def get_models_input():
             'strict_tool_extraction': [False],
             'tool_padding': [0.1],  # , 0.05, 0.1],  # , 0.1],
             'max_tokens_per_reply': [1024],
+            'temperature': [1.0],
+            'num_generations': ["dataset_dependent"],
             "evaluate": False,
             "analyze": False,  # later
             "contains_full_chkp": True,
-            "run_finished": False
+            "run_finished": False,
+            "paper": True
         },
 
         {
@@ -3076,7 +3121,7 @@ def get_models_input():
             'tool_padding': [0.1],  # , 0.05, 0.1],  # , 0.1],
             'max_tokens_per_reply': [1024],
             "evaluate": False,
-            "analyze": True,  # later
+            "analyze": False,  # later
             "contains_full_chkp": True,
             "run_finished": False
         },
@@ -3108,6 +3153,33 @@ def get_models_input():
         },
         #"_20260302_042226"
         #"Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_sample_recall_20260302_042226"
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_no_clamp",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_no_clamp_20260307_180324",
+            "checkpoint": [382],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["no_tool", "zoom_in_absolute"],  # , "no_tool"],
+            "dataset_name": ["pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+                             # "mme",
+                             # "mme_lite",
+                             # "pixel_reasoner_infovqa",
+                             # {"name": "muffin_chihuahua",
+                             # "grid_pixels": [1, 2, 4, 8],
+                             # "gridsize": [1, 2, 4, 8, 16],
+                             # "mode": ["single_cell_query", "find_outlier"]}
+                             ],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'tool_padding': [0.1],  # , 0.05, 0.1],  # , 0.1],
+            'max_tokens_per_reply': [1024],
+            "evaluate": False,
+            "analyze": True,  # later
+            "contains_full_chkp": True,
+            "run_finished": False
+        },
+
     ]
 
     return models_input
@@ -3316,11 +3388,11 @@ if __name__ == "__main__":
 
         PMI_analysis = False
     else:
-        do_eval = True
+        do_eval = False
         batch_eval = True
         exist_ok = True
 
-        do_analysis = False
+        do_analysis = True
         batch_analyze = True
 
         do_metric_comparison = False

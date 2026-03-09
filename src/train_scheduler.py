@@ -277,58 +277,16 @@ if __name__ == "__main__":
 
     runs = [
 
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_conditional_constant_tool_0p03.json",
-            "shell_number": 3,
-            "path": "",
-            "state": "running"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool.json",
-            "shell_number": 1,
-            "path": "",
-            "state": "finished"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_tool_params.json",
-            "shell_number": 2,
-            "path": "",
-            "state": "finished"
-        },
+
 
         {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_15.json",
-            "shell_number": 1,
-            "path": "",
-            "state": "wait"
-        },
-
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_20.json",
-            "shell_number": 2,
-            "path": "",
-            "state": "running"
-        },
-
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_tool_params_same_digits.json",
-            "shell_number": 2,
-            "path": "",
-            "state": "wait"
-        },
-
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_chkps.json",
-            "shell_number": 3,
-            "path": "",
-            "state": "to_be_launched"
-        },
-        {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_sample_recall.json",
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_per_seq.json",
             "shell_number": 2,
             "path": "",
             "state": "to_be_launched"
         },
+
+
     ]
 
     for run in runs:
