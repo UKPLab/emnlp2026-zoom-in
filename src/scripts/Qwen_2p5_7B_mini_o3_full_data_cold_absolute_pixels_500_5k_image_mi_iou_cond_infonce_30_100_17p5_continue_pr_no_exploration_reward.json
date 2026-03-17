@@ -1,11 +1,11 @@
 {
   "train_params": {
-    "output_dir_prefix": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/runs",
-    "model_name_or_path": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/runs/Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_20260123_184044/checkpoint-382/",
-    "deepspeed": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/scripts/zero3.json",
+    "output_dir_prefix": "/path/to/focusreason/runs",
+    "model_name_or_path": "/path/to/focusreason/runs/Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_20260123_184044/checkpoint-382/",
+    "deepspeed": "/path/to/focusreason/src/scripts/zero3.json",
     "dataset_name": "visual_probe_train:deepeyes_train_4k",
-    "data_file_paths": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/mini_o3/visual_probe_train/train.jsonl:/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/mini_o3/deepeyes_train_4k/train.jsonl",
-    "image_folders": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/mini_o3/visual_probe_train:/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/mini_o3/deepeyes_train_4k",
+    "data_file_paths": "/path/to/datasets/focusreason/mini_o3/visual_probe_train/train.jsonl:/path/to/datasets/focusreason/mini_o3/deepeyes_train_4k/train.jsonl",
+    "image_folders": "/path/to/datasets/focusreason/mini_o3/visual_probe_train:/path/to/datasets/focusreason/mini_o3/deepeyes_train_4k",
     "max_completion_length": 1024,
     "ds3_gather_for_generation": true,
     "use_vllm": true,
@@ -35,7 +35,7 @@
     "reward_func_conditionals": [
       false
     ],
-    "chat_template": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/qwen_chat_template_tool.json",
+    "chat_template": "/path/to/focusreason/src/qwen_chat_template_tool.json",
     "per_device_eval_batch_size": 4,
     "learning_rate": 1e-6,
     "lr_scheduler_type": "constant_with_warmup",

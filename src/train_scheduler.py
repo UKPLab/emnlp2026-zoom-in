@@ -154,8 +154,7 @@ def run_training_pipeline(vllm_screen_name, train_screen_name, vllm_command, tra
     train_env = {"CUDA_VISIBLE_DEVICES": cuda_devices}
 
     # Step 7: Launch the training
-    train_command = (f"cd /pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src "
-                     f"&& {train_command}")
+    train_command = (f"{train_command}")
     
     print(f"Starting training on GPUs: {cuda_devices}")
     start_or_resume_screen(train_screen_name, run_log_file, train_command, train_env)
@@ -272,27 +271,16 @@ if __name__ == "__main__":
     # Register signal handler for graceful exit
     signal.signal(signal.SIGINT, signal_handler)
 
-    script_dir = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/src/scripts"
+    script_dir = f"scripts"
 
 
     runs = [
-
         {
-            "json_name": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_continue_pr_no_exploration_reward.json",
+            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const.json",
             "shell_number": 1,
-            "path": "",
-            "state": "running"
-        },
-
-        {
-            "json_name": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_continue_pr_no_exploration_reward.json",
-            "shell_number": 2,
             "path": "",
             "state": "to_be_launched"
         },
-
-
-
     ]
 
     for run in runs:

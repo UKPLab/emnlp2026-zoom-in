@@ -1157,7 +1157,7 @@ class UpdatedVLMGRPOTrainerVLLM(Trainer):
             logger.info(f"len all_multi_turn after shorten: {len(all_multi_turn)}")
 
         if self.dummy_vllm_generation is not None:
-            prefix = ("/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/dummy_vllm_generation/"
+            prefix = ("/path/to/datasets/focusreason/dummy_vllm_generation/"
                       "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_Uncond_infonce_1_epoch_30_100_17p5_first_40")
             multi_turn_path = os.path.join(prefix, f'step_{self.state.global_step}_gpu_{self.accelerator.process_index}.pickle')
             tool_use_path = os.path.join(prefix, f'step_{self.state.global_step}_global_tool_use.pickle')

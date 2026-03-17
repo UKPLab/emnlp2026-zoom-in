@@ -33,7 +33,7 @@ def str_or_dict(value):
 class ModelParams:
 
     def __init__(self, short_name, model_path, checkpoint, model_class, output_path=None,
-                 dir_prefix="/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/runs/",
+                 dir_prefix=None,
                  dir_suffix="eval", **kwargs):
         self.dir_prefix = dir_prefix
         self.dir_suffix = dir_suffix
@@ -60,8 +60,8 @@ class DatasetParams:
     def __init__(self, dataset_name, verl_eval=False, **kwargs):
         self.dataset_name = dataset_name
         if self.dataset_name == "pixel_reasoner":
-            self.data_files = '/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/pixel_reasoner/RL_data_without_video/train.jsonl'
-            self.image_folders = '/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/pixel_reasoner/RL_data_without_video'
+            self.data_files = '/path/to/pr_without_video/train.jsonl'
+            self.image_folders = '/path/to/pr_without_video'
         elif self.dataset_name == "pixel_reasoner_vstar":
             if verl_eval:
                 task = "test_verl.json"
@@ -69,47 +69,43 @@ class DatasetParams:
             else:
                 task = "test.jsonl"
                 img_path = ""
-            self.data_files = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/pixel_reasoner/eval/V_Star/{task}"
-            self.image_folders = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/pixel_reasoner/eval/V_Star{img_path}"
+            self.data_files = f"/path/to/vstar/{task}"
+            self.image_folders = f"/path/to/vstar/{img_path}"
             self.default_num_generations = 32
 
-        elif self.dataset_name == "pixel_reasoner_infovqa":
-            self.data_files = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/pixel_reasoner/eval/Infographics_VQA/test.jsonl"
-            self.image_folders = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/pixel_reasoner/eval/Infographics_VQA"
-            self.default_num_generations = 2
         elif self.dataset_name == "hr_bench_4k":
             if verl_eval:
                 task = "test_verl.json"
             else:
                 task = "test.jsonl"
-            self.data_files = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/HR_Bench_4k/{task}"
-            self.image_folders = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/HR_Bench_4k/images"
+            self.data_files = f"/path/to/HR_Bench_4k/{task}"
+            self.image_folders = "/path/to/HR_Bench_4k/images"
             self.default_num_generations = 8
         elif self.dataset_name == "hr_bench_8k":
             if verl_eval:
                 task = "test_verl.json"
             else:
                 task = "test.jsonl"
-            self.data_files = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/HR_Bench_8k/{task}"
-            self.image_folders = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/HR_Bench_8k/images"
+            self.data_files = f"/path/to/HR_Bench_8k/{task}"
+            self.image_folders = "/path/to/HR_Bench_8k/images"
             self.default_num_generations = 8
         elif self.dataset_name == "mme":
             if verl_eval:
                 task = "test_verl.json"
             else:
                 task = "test.jsonl"
-            self.data_files = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/MME-RealWorld/{task}"
-            self.image_folders = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/MME-RealWorld/images"
+            self.data_files = f"/path/to/MME-RealWorld/{task}"
+            self.image_folders = "/path/to/MME-RealWorld/images"
             self.default_num_generations = 1
         elif self.dataset_name.startswith("mme_shard_"):
             shard_number = self.dataset_name.removeprefix("mme_shard_")
-            self.data_files = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/MME-RealWorld/test_shard_{shard_number}.jsonl"
-            self.image_folders = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/MME-RealWorld/images"
+            self.data_files = f"/path/to/MME-RealWorld/test_shard_{shard_number}.jsonl"
+            self.image_folders = "/path/to/MME-RealWorld/images"
             self.default_num_generations = 1
 
         elif self.dataset_name == "mme_lite":
-            self.data_files = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/MME-RealWorld-lite/test.jsonl"
-            self.image_folders = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/MME-RealWorld-lite/images"
+            self.data_files = "/path/to/MME-RealWorld-lite/test.jsonl"
+            self.image_folders = "/path/to/MME-RealWorld-lite/images"
         elif self.dataset_name.startswith("muffin_chihuahua"):
             if self.dataset_name.endswith("class_0_1") and "gridsize_1_" not in self.dataset_name:
                 task = "find_outlier"
@@ -121,8 +117,8 @@ class DatasetParams:
             else:
                 task += ".jsonl"
 
-            self.data_files = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/muffin_chihuahua/grid/{dataset_name.removeprefix('muffin_chihuahua_')}/{task}"
-            self.image_folders = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/muffin_chihuahua/grid/{dataset_name.removeprefix('muffin_chihuahua_')}/images"
+            self.data_files = f"/path/to/muffin_chihuahua/grid/{dataset_name.removeprefix('muffin_chihuahua_')}/{task}"
+            self.image_folders = f"/path/to/muffin_chihuahua/grid/{dataset_name.removeprefix('muffin_chihuahua_')}/images"
             self.default_num_generations = 4
         else:
             raise NotImplementedError(f"dataset {dataset_name} not implemented!")
@@ -202,14 +198,14 @@ class SingleEval:
         cmd = []
 
         if self.eval_params.verl_eval:
-            if self.dataset_params.data_files == "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/MME-RealWorld/test_verl.json":
+            if self.dataset_params.data_files == "/path/to/MME-RealWorld/test_verl.json":
                 eval_script = "run_eval_mme.sh"
                 cuda_devices = "0,1"
-            elif self.dataset_params.data_files in ["/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/HR_Bench_4k/test_verl.json"]:
+            elif self.dataset_params.data_files in ["/path/to/HR_Bench_4k/test_verl.json"]:
 
                 eval_script = "run_eval_hrb.sh"
                 cuda_devices = "0,1,2,3,4,5,6,7"
-            elif self.dataset_params.data_files in ["/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/HR_Bench_8k/test_verl.json"]:
+            elif self.dataset_params.data_files in ["/path/to/HR_Bench_8k/test_verl.json"]:
                 eval_script = "run_eval_hrb_8k.sh"
                 cuda_devices = "0,1,2,3,4,5,6,7"
             else:
@@ -232,7 +228,7 @@ class SingleEval:
                 '--seed', f'{seed}'
                 #'--data_path', f'{self.dataset_params.data_files.removesuffix(".jsonl")}_verl.json'
             ]
-            working_directory = '/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/mini_o3/Mini-o3'
+            working_directory = '/path/to/Mini-o3'
 
         else:
             cmd += [
@@ -3560,21 +3556,3 @@ if __name__ == "__main__":
 
     if do_analysis:
         analyze()
-
-
-    if PMI_analysis:
-        all_evals = Evals([model for model in models_input if "PMI_analysis" in model.keys() and model["PMI_analysis"] is True])
-        order = [eval.get_eval_name() for eval in all_evals.evals]
-        full_paths = [eval.get_save_path() for eval in all_evals.evals]
-
-        logger.info(f"order: {order}")
-
-        #full_path = ["/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/runs/Qwen_2p5_7B_pr_data_warm_absolute_pixels_5k_image_tokens_20251008_102353/checkpoint-382/eval/dataset_pixel_reasoner_vstar_prompt_PR_zoom_in_old_max_pixels_3920000_min_pixels_3136"]
-        fixed_params = {"dataset_name": "pixel_reasoner_vstar",
-                        "max_pixels": 5000 * 28 * 28,
-                        "min_pixels": 250*28*28,
-                        "tool_config_type": "PR_zoom_in_old"#"no_tool"#
-                        }
-        filtered_evals = all_evals.filter(order, fixed_params=fixed_params)
-        do_pmi_analysis([eval.get_save_path() for eval in filtered_evals],
-                        fixed_params=fixed_params)

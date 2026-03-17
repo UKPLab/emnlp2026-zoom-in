@@ -9,6 +9,9 @@ import numpy as np
 import torchvision
 from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance, ImageFilter
 import random
+from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import urlopen
 
 
 class ImageAugmenter:
@@ -326,30 +329,48 @@ def get_bbox(correct_label:int, cells_per_row:int, cell_size: int) -> list[int]:
 
     return bbox
 
+def download_images(urls: list[str], directory: str = ".") -> None:
+    target_dir = Path(directory)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    for url in urls:
+        filename = Path(urlparse(url).path).name or "image"
+        output_path = target_dir / filename
+
+        with urlopen(url) as response, open(output_path, "wb") as file:
+            file.write(response.read())
+
 
 # Example Usage:
 if __name__ == "__main__":
 
-    train_dir = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/muffin_chihuahua/hard/muffin"
+    train_dir = "/path/to/downloaded/mc_images"
 
-    #initial_preprocess(train_dir)
+    image_base_url = "https://www.topbots.com/downloads/code/vision/chihuahua_vs_muffin/"
+    image_list = []
+    for i in range(1, 17):
+        image_list.append(os.path.join(image_base_url, f"test{i}.png"))
+
+    download_images(image_list, train_dir)
+
+    initial_preprocess(train_dir)
 
     total_images = 100
-    save_path_prefix = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/muffin_chihuahua/grid/"
+    save_path_prefix = "/save/path"
 
     configs = []
     for bis in [1,2,4,8]:
         bis = bis * 1024
-        for gs in [1]:#,2,4,8, 16, 32, 64]:
+        for gs in [1,2,4,8, 16]:
             #if make_grid_data:
             configs.append({"big_image_size": bis, "grid_size": gs, "num_samples_class_0": 1})
             if gs > 1:
                 configs.append({"big_image_size": bis, "grid_size": gs, "num_samples_class_0": int(gs**2 / 2)})
 
-    #make_grid_data(configs, total_images=total_images, save_path_prefix=save_path_prefix)
+    make_grid_data(configs, total_images=total_images, save_path_prefix=save_path_prefix)
 
     make_vqa_dataset(configs, save_path_prefix=save_path_prefix,
-                     variant="single_cell_query", #"find_outlier",# single_cell_query
+                     variant="single_cell_query", #"find_outlier",
                      total_images=total_images)
 
 
