@@ -277,14 +277,20 @@ if __name__ == "__main__":
 
     runs = [
 
-
+        {
+            "json_name": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_continue_pr_no_exploration_reward.json",
+            "shell_number": 1,
+            "path": "",
+            "state": "running"
+        },
 
         {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_per_seq.json",
+            "json_name": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_continue_pr_no_exploration_reward.json",
             "shell_number": 2,
             "path": "",
             "state": "to_be_launched"
         },
+
 
 
     ]

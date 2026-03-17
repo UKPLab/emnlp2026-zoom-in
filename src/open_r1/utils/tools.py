@@ -6,7 +6,6 @@ import os
 from functools import partial, reduce
 import operator
 import copy
-from qwen_vl_utils import smart_resize
 
 from .logger import get_logger
 from .utils import get_resized_image_scales, generate_bbox_2d_new_close_iou_targeted
@@ -52,6 +51,18 @@ TOOL_CONFIGS = {
                                             "function,parameters,properties,bbox_2d,items,type": "integer"},
                 "tool_message": [{"text": "\nHere is the cropped image (Image Size: <width>x<height>):", "fillers": ["width", "height"]},
                                  {"text": None},
+                                 ],
+                "prompt_type": "pr_adapted"
+            },
+            "zoom_in_absolute_q3p5":
+            {   "tool_name": "zoom_in",
+                "tool_template": "zoom_in",
+                "tool_json_customization": {"function,description": "Zoom in on the image based on the bounding box coordinates.",
+                                            "function,parameters,properties,bbox_2d,description": "coordinates for bounding box of the area you want to zoom in. minimum value is 0 and maximum value is the width/height of the image.",
+                                            "function,parameters,properties,bbox_2d,items,type": "integer"},
+                "tool_message": [{"text": "\nHere is the cropped image:"},
+                                 {"text": None},
+                                 {"text": "\nIf you are ready to answer, put your final answer within \\boxed{}."}
                                  ],
                 "prompt_type": "pr_adapted"
             },
@@ -149,14 +160,17 @@ def show_image(image_path: str, **kwargs):
     return image_path
 
 def zoom_in(image_path, bbox_2d, padding=(0.1,0.1), min_pixels=None, max_pixels=None, bbox_type:str=None,
-            adaptive_padding_threshold:int=600.0):
+            adaptive_padding_threshold:int=600.0, base_model="qwen_2p5"):
     """
     Crop the image based on the bounding box coordinates.
     """
     image = Image.open(image_path)
     img_x, img_y = image.size
 
-    input_height, input_width = get_resized_image_scales(img_y, img_x, min_pixels, max_pixels)
+    if base_model == "qwen_3p5":
+        input_height, input_width = 1000, 1000
+    else:
+        input_height, input_width = get_resized_image_scales(img_y, img_x, min_pixels, max_pixels, base_model)
 
     logger.info(f"in zoom_in: original size: {img_x}x{img_y}")
     logger.info(f"in zoom_in: small size: {input_width}x{input_height}")
@@ -348,7 +362,7 @@ class Tool:
         return self.tool_dict
 
     def call_tool(self, tool_params: dict, save_path: str = None, generate_and_use_new_bbox:dict=None,
-                  only_return_new_bbox:bool=False):
+                  only_return_new_bbox:bool=False, base_model="qwen_2p5"):
 
         tool_args = tool_params['arguments']
 
@@ -400,11 +414,13 @@ class Tool:
             new_image = Image.new('RGB', (int(new_bbox[2] - new_bbox[0]),
                                                     int(new_bbox[3] - new_bbox[1])), color=color_rgb)
         else:
-            new_image, absolute_bbox_wrt_target_coords = self.callable_function(**actual_tool_args)
+            new_image, absolute_bbox_wrt_target_coords = self.callable_function(**actual_tool_args, base_model=base_model)
 
         img_x, img_y = new_image.size
 
-        input_height, input_width = get_resized_image_scales(img_y, img_x, self.tool_hparams["min_pixels"], self.tool_hparams["max_pixels"])
+        input_height, input_width = get_resized_image_scales(img_y, img_x, self.tool_hparams["min_pixels"],
+                                                             self.tool_hparams["max_pixels"],
+                                                             base_model)
 
 
         message_args = tool_args.copy()

@@ -1,3 +1,13 @@
+import asyncio
+import base64
+import mimetypes
+import re
+import subprocess
+import urllib.request
+from pathlib import Path
+
+from openai.types.chat import ChatCompletionMessage
+
 from open_r1.utils.logger import get_logger, setup_project_logging
 import torch
 import argparse
@@ -23,6 +33,8 @@ from open_r1.utils.prompts import get_question_template
 import gc
 import sys
 
+from openai import AsyncOpenAI, OpenAI
+
 from open_r1.utils.multi_turn_manager import MultiTurn, pad
 
 from vllm.inputs import TokensPrompt
@@ -37,7 +49,7 @@ class VLLM:
 
     def __init__(self, model:str, tensor_parallel_size:int, gpu_memory_utilization,
                  dtype, enable_prefix_caching, max_model_len,
-                 enforce_eager, limit_mm_per_prompt, mm_processor_kwargs, revision=None, disable_custom_all_reduce=None):
+                 enforce_eager, limit_mm_per_prompt, mm_processor_kwargs, revision=None, disable_custom_all_reduce=False):
         self.model = model
         self.tensor_parallel_size = tensor_parallel_size
         self.gpu_memory_utilization = gpu_memory_utilization
@@ -159,6 +171,333 @@ class VLLM:
             except Exception as cleanup_error:
                 logger.warning(f"Error during cleanup: {cleanup_error}")
 
+class VLLM_Server:
+    def __init__(self, is_async: bool, max_concurrency: int = 1, port:int=8000):
+        self.is_async = is_async
+        self.max_concurrency = max_concurrency
+        self.port = port
+        if is_async:
+            self.client = AsyncOpenAI(
+                api_key="EMPTY",
+                base_url=f"http://localhost:{self.port}/v1",
+                timeout=3600
+            )
+        else:
+            self.client = OpenAI(
+                api_key="EMPTY",
+                base_url=f"http://localhost:{self.port}/v1",
+                timeout=3600
+            )
+
+    def process_data(self, samples: list[dict], tools: list[Tool], save_path:str, max_rounds: int):
+        tool_dict = [tool.get_tool_dict() for tool in tools] if tools is not None else None
+        #tool_names = [d["function"]["name"] for d in tool_dict] if tool_dict else None
+        #tool_callables = {tool.get_tool_dict()["function"]["name"]:tool.callable_function for tool in tools} if tools is not None else None
+
+        if tools is not None and len(tools) > 1:
+            raise ValueError("Only one tool is supported for evaluation")
+
+        if self.is_async:
+             return asyncio.run(self.run_dataset(samples=samples, tools=tools, save_path=save_path, max_rounds=max_rounds,
+                                                 max_concurrency=self.max_concurrency))
+        else:
+            all_replies = []
+            for sample in samples:
+                image_url = self.local_image_to_data_url(sample["image_path"])
+                all_image_paths = [sample["image_path"]]
+                all_messages = [{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": image_url
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": sample["text"]
+                        }
+                    ]
+                }]
+
+                #max_rounds = 2
+                for _ in range(max_rounds):
+
+                    response = self.client.chat.completions.create(
+                        model="Qwen/Qwen3.5-9B",
+                        messages=all_messages,
+                        tools=tool_dict
+                        #max_tokens=2048
+                    )
+
+                    print(f"Generated text: {response.choices[0].message}")
+
+                    new_message = response.choices[0].message
+
+                    # Final answer case
+                    if len(new_message.tool_calls) == 0:
+                        logger.info(f"list of tool calls empty, this sample is finished!")
+                        all_replies.append({"content": response.choices[0].message.content,
+                                            "reasoning": response.choices[0].message.reasoning,
+                                            "tool_calls": response.choices[0].message.tool_calls})
+                        break
+
+                    # Assistant tool call message
+                    assistant_message = {
+                        "role": "assistant",
+                        "content": new_message.content or "",
+                        "tool_calls": [],
+                    }
+
+                    for tc in new_message.tool_calls:
+                        assistant_message["tool_calls"].append({
+                            "id": tc.id,
+                            "type": tc.type,
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        })
+
+                    all_messages.append(assistant_message)
+
+                    # Execute tools and append tool results
+                    for tc in new_message.tool_calls:
+                        tool_name = tc.function.name
+                        tool_args = json.loads(tc.function.arguments)
+
+                        logger.info(f"Executing tool: {tool_name} with args: {tool_args}")
+
+                        if tool_name != tool_dict[0]["function"]["name"]:
+                            tool_result = {
+                                "error": f"Unknown tool: {tool_name}"
+                            }
+                        else:
+                            try:
+                                tool_call_result = tools[0].call_tool({"arguments": tool_args,
+                                                                       "image_paths":all_image_paths},
+                                                                      save_path=os.path.join(save_path,"tool_calls"),
+                                                                      base_model="qwen_3p5")
+                                all_image_paths.append(tool_call_result["new_image_path"])
+
+                                for i, part in enumerate(tool_call_result["output_message"]):
+                                    if part["type"] == "image":
+
+                                        url_format = {
+                                            "type": "image_url",
+                                                "image_url": {
+                                                    "url": self.local_image_to_data_url(tool_call_result["new_image_path"])
+                                                }
+                                        },
+                                        tool_call_result["output_message"][i] = url_format
+                                        break
+                                tool_result = tool_call_result["output_message"]
+                                logger.info(f"Tool '{tool_name}' executed successfully")
+
+
+                            except Exception as e:
+                                tool_result = {
+                                    "error": f"Tool execution failed: {str(e)}"
+                                }
+
+                        logger.info(f"Tool '{tool_name}' executed with result: {tool_result}")
+
+                        all_messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": json.dumps(tool_result),
+                        })
+
+                all_replies.append({"content": response.choices[0].message.content,
+                                    "reasoning": response.choices[0].message.reasoning,
+                                    "tool_calls": response.choices[0].message.tool_calls})
+            return all_replies
+
+
+
+    def local_image_to_data_url(self, path: str) -> str:
+        path_obj = Path(path)
+        mime_type, _ = mimetypes.guess_type(path_obj.name)
+        if mime_type is None:
+            mime_type = "application/octet-stream"
+
+        with open(path_obj, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode("utf-8")
+
+        return f"data:{mime_type};base64,{encoded}"
+
+    def replace_b64_by_path(self, content, image_path: str):
+        #logger.info(f"in replace_b64_by_path: {content}")
+        content_copy = copy.deepcopy(content)
+        for i, part in enumerate(content_copy):
+            if isinstance(part, dict):
+                #logger.info(part.keys())
+                if part["type"] == "image_url":
+                    #logger.info(f"replace image url by image path now!")
+                    part["image_url"] = image_path
+        return content_copy
+
+    async def run_dataset(self, samples: list[dict], tools: list[Tool], save_path: str, max_rounds: int, max_concurrency: int = 16) -> list[dict]:
+        semaphore = asyncio.Semaphore(max_concurrency)
+        tasks = [self.run_one_sample(sample, tools, save_path, max_rounds, semaphore) for sample in samples]
+        return await asyncio.gather(*tasks)
+
+    async def run_one_sample(self, sample: dict, tools: list[Tool], save_path: str, max_rounds: int, semaphore: asyncio.Semaphore) -> dict:
+        tool_dict = [tool.get_tool_dict() for tool in tools] if tools is not None else None
+        async with (semaphore):
+            image_url = self.local_image_to_data_url(sample["image_path"])
+
+            all_messages = [{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": image_url
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": sample["text"]
+                    }
+                ]
+            }]
+
+            all_messages_with_image_path = [
+                {
+                    "role": "user",
+                    "content": self.replace_b64_by_path(all_messages[0]["content"], sample["image_path"])
+                }
+            ]
+
+
+            #self.replace_b64_by_path(all_messages, sample["image_path"])
+            no_tool_calls = 0
+            tool_calls_for_logging = []
+            #max_rounds = 2
+            for no_turns in range(max_rounds):
+                all_image_paths = [sample["image_path"]]
+                try:
+                    response = await self.client.chat.completions.create(
+                        model="Qwen/Qwen3.5-9B",
+                        messages=all_messages,
+                        tools=tool_dict
+                        # max_tokens=2048
+                    )
+                except Exception as e:
+                    logger.info(f"Error during completion: {e}")
+                    #logger.info(f"all messages: {all_messages}")
+                    logger.info(f"sleeping ...")
+                    #time.sleep(100)
+                    continue
+                    #return {"status": {"generation error during": no_turns+1},
+                    #       "all_messages": all_messages_with_image_path}
+
+
+                logger.info(f"Generated text: {response.choices[0].message}")
+
+                new_message = response.choices[0].message
+
+
+
+                # Assistant tool call message
+                #assistant_message = {
+                #    "role": "assistant",
+                #    "content": new_message.content or "",
+                #    "tool_calls": [],
+                #}
+
+                #for tc in new_message.tool_calls:
+                #    assistant_message["tool_calls"].append({
+                #        "id": tc.id,
+                #        "type": tc.type,
+                #        "function": {
+                #            "name": tc.function.name,
+                #            "arguments": tc.function.arguments,
+                #        },
+                #    })
+
+                all_messages.append(new_message)
+                all_messages_with_image_path.append(new_message)
+
+                tool_calls = new_message.tool_calls or []
+
+                # Final answer case
+                if len(tool_calls) == 0:
+                    logger.info(f"list of tool calls empty, sample {sample['sample_idx']} is finished! final full multi-turn interaction: {all_messages_with_image_path}")
+
+                    return {"status": {"success after": no_turns+1},
+                            "tool_calls": tool_calls_for_logging,
+                           "all_messages": all_messages_with_image_path}
+
+                # Execute tools and append tool results
+                for tc in tool_calls:
+                    tool_name = tc.function.name
+                    tool_args = json.loads(tc.function.arguments)
+
+                    logger.info(f"Executing tool: {tool_name} with args: {tool_args}")
+
+                    if tool_name != tool_dict[0]["function"]["name"]:
+                        tool_result = [{
+                            "type": "text",
+                            "text": f"Error: Unknown tool: {tool_name}"
+                        }]
+                    else:
+                        try:
+                            tool_call_result = tools[0].call_tool({"arguments": tool_args,
+                                                                   "image_paths": all_image_paths},
+                                                                  save_path=os.path.join(save_path, "tool_calls"),
+                                                                  base_model="qwen_3p5")
+                            all_image_paths.append(tool_call_result["new_image_path"])
+
+                            for i, part in enumerate(tool_call_result["output_message"]):
+                                if part["type"] == "image":
+                                    url_format = {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": self.local_image_to_data_url(tool_call_result["new_image_path"])
+                                        }
+                                    }
+                                    tool_call_result["output_message"][i] = url_format
+                                    break
+                            tool_result = tool_call_result["output_message"]
+
+                            tool_calls_for_logging.append({"bbox_wrt_target": tool_call_result["absolute_bbox_wrt_target_coords"],
+                                                           "target": tool_call_result["target_image_idx"]})
+
+
+
+                            logger.info(f"Tool '{tool_name}' executed successfully")
+
+
+                        except Exception as e:
+                            tool_result = [{
+                                "type": "text",
+                                "text": f"Error: Tool execution failed: {str(e)}"
+                            }]
+
+                    tool_result_with_image_path = self.replace_b64_by_path(tool_result, all_image_paths[-1])
+
+                    logger.info(f"Tool '{tool_name}' executed with result: {tool_result_with_image_path}")
+
+                    all_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": tool_result,
+                    })
+                    all_messages_with_image_path.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": tool_result_with_image_path,
+                    })
+                    no_tool_calls += 1
+
+            logger.info(f"max rounds exceeded, returning error")
+            return_dict = {"status": {"error after": max_rounds},
+                           "tool_calls": tool_calls_for_logging,
+                           "all_messages": all_messages_with_image_path}
+            return return_dict
 
 class Evaluator:
 
@@ -178,7 +517,8 @@ class Evaluator:
         #self.eval_path = None
 
 
-    def evaluate(self, dataset:dict, prompt_type, batch_size, exist_ok, tools:list[Tool]):
+    def evaluate(self, dataset:dict, prompt_type, batch_size, exist_ok, tools:list[Tool], qwen_3p5_eval:bool=False,
+                 port:int=8000):
 
         # _tool_fixed_crop
         #self.eval_path = os.path.join(self.save_path, f"dataset_{dataset['dataset_name']}_prompt_{prompt_type}")
@@ -206,7 +546,11 @@ class Evaluator:
             if batch_no >= 0:
 
                 t0 = time.time()
-                self._generate_and_score_completions(inputs=batch, tools=tools)
+                if qwen_3p5_eval:
+                    self.vllm_server_inference(inputs=batch, tools=tools, save_path=self.save_path,
+                                               max_tool_uses=self.max_tool_uses, port=port)
+                else:
+                    self._generate_and_score_completions(inputs=batch, tools=tools)
                 t1 = time.time()
                 logger.info(f"time for batch of size {batch_size}: {t1-t0}")
             #logger.info(f"metrics after batch {batch_no}: {self.metrics}")
@@ -216,7 +560,7 @@ class Evaluator:
 
     def preprocess_dataset(self, dataset, prompt_type, tools):
         if dataset["dataset_name"] in ["pixel_reasoner", 'pixel_reasoner_vstar', 'pixel_reasoner_infovqa',
-                                       "hr_bench_4k", "hr_bench_8k", "mme", "mme_lite"] or dataset["dataset_name"].startswith("muffin_chihuahua"):
+                                       "hr_bench_4k", "hr_bench_8k"] or dataset["dataset_name"].startswith("muffin_chihuahua") or dataset["dataset_name"].startswith("mme"):
             #logger.info(f"prompt type: {prompt_type}")
             #logger.info(f"tool name: {tool_name}")
             logger.info(f"in preprocess_dataset, tools={tools}")
@@ -475,6 +819,157 @@ class Evaluator:
         self.metrics["images"] += all_image_paths
 
 
+
+    def vllm_server_inference(self, inputs, tools, save_path, max_tool_uses, port:int=8000):
+
+        is_async = True
+        inputs = inputs
+
+        vllm_server = VLLM_Server(is_async, max_concurrency=16, port=port)
+
+        image_paths = []
+        for x in inputs:
+            if "image_path" in x and x["image_path"] is not None:
+                for p in x["image_path"]:
+                    image_paths.append(p)
+                assert len(x["image_path"]) == 1, f"Example {x} contains more than one image which is not supported atm"
+            else:
+                raise ValueError(f"sample {x} does not contain any image path")
+
+        samples = []
+
+        for i, input in enumerate(inputs):
+            only_text = ""
+            for c in input["prompt"][0]["content"]:
+                if c["type"] == "text":
+                    only_text = c["text"]
+
+            only_text = only_text.removeprefix("<image>\n")
+
+            if only_text == "":
+                raise ValueError(f"empty prompt in input {input}")
+
+            logger.info(f"message {i}: {only_text}")
+
+            samples.append({"text": only_text, "image_path": image_paths[i], "sample_idx": i})
+
+        results = vllm_server.process_data(samples=samples, tools=tools, save_path=save_path, max_rounds=max_tool_uses)
+        #{"status": {"success after": no_turns + 1},
+        # "all_messages": all_messages_with_image_path}
+        logger.info(f"full results: {results}")
+        tool_uses = [len(r["tool_calls"]) for r in results]
+        #for r in results:
+
+        #    if "success after" in r["status"]:
+        #        tool_uses.append(r["status"]["success after"]-1)
+        #    elif "error after" in r["status"]:
+        #        tool_uses.append(r["status"]["error after"])
+        #    #elif "generation error during" in r["status"]:
+        #    #    tool_uses.append(r["status"]["generation error during"]-1)
+        #    else:
+        #        raise ValueError(f"unknown status: {r['status']}")
+
+        model_answers = []
+        for r in results:
+            model_answer = None
+            for msg in r["all_messages"]:
+                if isinstance(msg, ChatCompletionMessage) and msg.content is not None:
+                    model_answer=msg.content
+            model_answers.append(model_answer if model_answer is not None else "")
+
+        completions = model_answers
+        logger.info(f"number of completions: {len(completions)}")
+        manual_bbox_change_count = 0
+        new_completions = []
+        # this works as apply_chat_template just appends before and after without realizing that there are multiple turns inside
+        if is_conversational(inputs[0]):
+            for completion in completions:
+                new_completion = re.sub(r'\(([A-Za-z0-9{,3}])\)$', r'\\boxed{\1}', completion)
+                if not new_completion == completion:
+                    manual_bbox_change_count += 1
+                new_completions.append([{"role": "assistant", "content": new_completion}])
+
+
+        completions = new_completions
+
+        # solutions = [x['solution'] for x in inputs]
+        solutions = [inp["solution"] for inp in inputs]
+        prompts = [inp["prompt"] for inp in inputs]
+        logger.info(f"before acc reward: prompts: {prompts} \n\n completions: {completions} \n\n solutions: {solutions}")
+        logger.info(f"manual_bbox_change_count: {manual_bbox_change_count}")
+
+        accuracies = accuracy_reward(prompts=prompts, completions=completions,
+                                     solution=solutions,
+                                     cutoff=1.0,
+                                     accu_reward_method=[inp["accu_reward_method"] for inp in inputs])
+
+        self.metrics["accuracy"]+=accuracies
+        self.metrics["tool_use"]+=tool_uses
+
+        has_bboxes = "bbox" in inputs[0].keys()
+
+        if has_bboxes:
+            gold_bboxes = [inp["bbox"] for inp in inputs]
+
+            global_pred_bboxes = []
+            for i in range(len(inputs)):
+                pred_bboxes = []
+                for tc in results[i]["tool_calls"]:
+                    target = tc["target"]
+                    pred_bbox = tc["bbox_wrt_target"]
+                    if target != 0:
+                        # the coords are wrt the cropped image and have to be shifted by its upper right corner
+                        new_bbox = (pred_bboxes[target - 1][0] + pred_bbox[0],
+                                    pred_bboxes[target - 1][1] + pred_bbox[1],
+                                    pred_bboxes[target - 1][0] + pred_bbox[2],
+                                    pred_bboxes[target - 1][1] + pred_bbox[3])
+                        pred_bboxes.append(new_bbox)
+                    else:
+                        pred_bboxes.append(pred_bbox)
+                global_pred_bboxes.append(pred_bboxes)
+
+            bboxes = global_pred_bboxes
+
+            logger.info(f"gold bboxes: {gold_bboxes}")
+            logger.info(f"bboxes: {bboxes}")
+
+            overlap_metric_names = ["ious", "precision", "recall"]
+            for overlap_metric_idx, overlap_metric_name in enumerate(overlap_metric_names):
+                overlap_metrics = []
+                for idx in range(len(gold_bboxes)):
+                    if gold_bboxes[idx] is None:
+                        logger.info(f"gold_bbox is None for sample {idx}, skipping")
+                        continue
+                    overlap_metrics_per_sample = []
+                    for tool_use_idx in range(len(bboxes[idx])):
+                        overlap_metric = calculate_overlap_metrics(bboxes[idx][tool_use_idx], gold_bboxes[idx])[overlap_metric_idx]
+                        overlap_metrics_per_sample.append(overlap_metric)
+                    overlap_metrics.append(overlap_metrics_per_sample)
+                        #if len(overlap_metrics) < tool_use_idx + 1:
+                        #    overlap_metrics.append([overlap_metric])
+                        #else:
+                        #    overlap_metrics[tool_use_idx].append(overlap_metric)
+
+                logger.info(f"after {overlap_metric_name} calculation: {overlap_metrics}")
+
+                self.metrics[overlap_metric_name] += overlap_metrics
+
+                #for tool_use_idx in range(len(overlap_metrics)):
+                #    if len(self.metrics[overlap_metric_name]) < tool_use_idx + 1:
+                #        self.metrics[overlap_metric_name].append(overlap_metrics[tool_use_idx])
+                #    else:
+               #         self.metrics[overlap_metric_name][tool_use_idx] += overlap_metrics[tool_use_idx]
+
+
+
+
+
+
+        # results is a list of dicts, where each dict has the keys 'content' (str), 'reasoning' (str) , 'tool_calls' (list)
+        return results
+
+
+
 def evaluation_process(model_path, model_class, output_path:str, tensor_parallel_size: int, image_limit: int, max_tool_uses:int,
                        strict_tool_extraction: bool,
                        dataset:dict, prompt_type: str,
@@ -484,7 +979,10 @@ def evaluation_process(model_path, model_class, output_path:str, tensor_parallel
                        batch_size:int=1000, no_vllm:bool=False,
                        enforce_eager:bool=False,
                        tool_args:list[dict]=None,
-                       mm_processor_kwargs:dict=None):
+                       mm_processor_kwargs:dict=None,
+                       qwen_3p5_eval:bool=False,
+                       port:int=8000
+                       ):
     if tool_args is None or (len(tool_args) == 1 and tool_args[0] is None) or (len(tool_args) == 1 and tool_args[0]["tool_name"] == ""):
         tools = None
     else:
@@ -506,8 +1004,42 @@ def evaluation_process(model_path, model_class, output_path:str, tensor_parallel
     processing_class = AutoProcessor.from_pretrained(model_class)
     processing_class.chat_template = json.load(open("qwen_chat_template_tool.json", "r"))["chat_template"]
 
+    reuse_existing_vllm_server = True
+    vllm_server_up = False
+
     if no_vllm:
         llm_engine = None
+    elif qwen_3p5_eval:
+        llm_engine = None
+        try:
+            urllib.request.urlopen(f"http://0.0.0.0:{port}/ping").read()
+            vllm_server_up = True
+            logger.info(f"server exists already!")
+        except urllib.error.URLError:
+            if not reuse_existing_vllm_server:
+                raise RuntimeError("VLLM server already exists and reusing is disabled!")
+
+        if not vllm_server_up:
+
+            cmd = f"vllm serve Qwen/Qwen3.5-9B --port {port} --tensor-parallel-size {tensor_parallel_size} --max-model-len 262144 --reasoning-parser qwen3"
+
+            if tools is not None:
+                cmd += f" --enable-auto-tool-choice --tool-call-parser qwen3_coder"
+
+            #if mm_processor_kwargs is not None:
+            #    cmd += f" --mm-processor-kwargs '{mm_processor_kwargs}'"
+
+            server = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+            for i in range(60):
+                try:
+                    urllib.request.urlopen(f"http://0.0.0.0:{port}/ping").read()
+                    break
+                except urllib.error.URLError:
+                    logger.info(f"Server not ready, retrying in 10 seconds...")
+                    time.sleep(10)
+
+            logger.info(f"Server started successfully")
     else:
         llm_engine = VLLM(
             model=model_path,
@@ -553,9 +1085,12 @@ def evaluation_process(model_path, model_class, output_path:str, tensor_parallel
                        prompt_type=prompt_type,
                        batch_size=batch_size,
                        exist_ok=False,
-                       tools=tools)
+                       tools=tools,
+                       qwen_3p5_eval=qwen_3p5_eval,
+                       port=port)
     t1 = time.time()
     logger.info(f"Process took {t1 - t0} seconds")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Evaluate VLM model performance')
@@ -582,6 +1117,8 @@ if __name__ == "__main__":
     parser.add_argument('--max_tokens_per_reply', type=int, default=256, help='Maximum number of tokens per reply')
     parser.add_argument('--temperature', type=float, default=0.0, help='sampling with temperature, 0.0 is greedy')
     parser.add_argument('--num_generations', type=int, default=1, help='How many generations. Value > 1 is only meaningful for temperature > 0')
+    parser.add_argument('--qwen_3p5_eval', action='store_true', help='Whether Qwen 3.5 should be evaluated')
+    parser.add_argument('--port', type=int, default=8000, help='port for the vLLM server, only used for q3p5 eval')
 
     args = parser.parse_args()
 
@@ -630,6 +1167,8 @@ if __name__ == "__main__":
 
     batch_size = args.batch_size // args.num_generations
 
+
+
     evaluation_process(
         args.model_path,
         args.model_class,
@@ -647,5 +1186,7 @@ if __name__ == "__main__":
         args.no_vllm,
         args.enforce_eager,
         tool_configs,
-        mm_processor_kwargs
+        mm_processor_kwargs,
+        args.qwen_3p5_eval,
+        args.port
     )

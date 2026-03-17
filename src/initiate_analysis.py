@@ -1,4 +1,5 @@
 import argparse
+import base64
 import copy
 import os
 import shutil
@@ -19,6 +20,15 @@ import numpy as np
 from open_r1.analysis.analyze_PMI import do_pmi_analysis
 
 logger = setup_project_logging(log_file=None)
+
+def str_or_dict(value):
+    try:
+        parsed = json.loads(base64.b64decode(value).decode())
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    return value  # fallback: treat as plain string
 
 class ModelParams:
 
@@ -91,6 +101,12 @@ class DatasetParams:
             self.data_files = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/MME-RealWorld/{task}"
             self.image_folders = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/MME-RealWorld/images"
             self.default_num_generations = 1
+        elif self.dataset_name.startswith("mme_shard_"):
+            shard_number = self.dataset_name.removeprefix("mme_shard_")
+            self.data_files = f"/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/MME-RealWorld/test_shard_{shard_number}.jsonl"
+            self.image_folders = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/MME-RealWorld/images"
+            self.default_num_generations = 1
+
         elif self.dataset_name == "mme_lite":
             self.data_files = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/MME-RealWorld-lite/test.jsonl"
             self.image_folders = "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/MME-RealWorld-lite/images"
@@ -117,7 +133,8 @@ class EvalParams:
     def __init__(self, batch_size=200, tensor_parallel_size=1, enforce_eager=True, no_vllm=False, dry_run=False,
                  min_pixels=None, max_pixels=None, tool_config_type = "no_tool", image_limit=6, max_tool_uses=5,
                  bbox_type=None, strict_tool_extraction=False,max_tokens_per_reply=256,
-                 tool_padding=0.1, tool_adaptive_padding_threshold=600, verl_eval:bool=False,
+                 tool_padding=0.1, tool_adaptive_padding_threshold=600, verl_eval:bool=False, qwen_3p5_eval:bool=False,
+                 port:int=8000,
                  temperature=0.0, num_generations=1, **kwargs):
         # technical
         self.batch_size = batch_size
@@ -126,17 +143,25 @@ class EvalParams:
         self.no_vllm = no_vllm
         self.dry_run = dry_run
         self.verl_eval = verl_eval
+        self.qwen_3p5_eval = qwen_3p5_eval
         self.temperature = temperature
         self.num_generations = num_generations
+        self.port = port
 
         # outcome relevant
         if max_pixels is None:
-            self.max_pixels = 1024*16 * 28 * 28
+            if self.qwen_3p5_eval:
+                self.max_pixels = 1024 * 16*32*32
+            else:
+                self.max_pixels = 1024*16 * 28 * 28
         else:
             self.max_pixels = max_pixels
 
         if min_pixels is None:
-            self.min_pixels = 4*28*28
+            if self.qwen_3p5_eval:
+                self.min_pixels = 64*32*32
+            else:
+                self.min_pixels = 4 * 28 * 28
         else:
             self.min_pixels = min_pixels
 
@@ -175,40 +200,8 @@ class SingleEval:
     def get_command(self, save_path ):
 
         cmd = []
-        if not self.eval_params.verl_eval:
-            cmd += [
-                'python', '-m', 'open_r1.evaluation.evaluate',
-                '--model_path', f'{self.model_params.full_model_path}',
-                '--model_class', f'{self.model_params.model_class}',
-                '--output_path', f'{save_path}',
 
-                '--dataset_name', self.dataset_params.dataset_name,
-                # '--prompt_type', f"{prompt_type}",
-                '--data_filepath', self.dataset_params.data_files,
-                '--image_filepath', self.dataset_params.image_folders,
-
-                '--tensor_parallel_size', f'{self.eval_params.tensor_parallel_size}',
-                '--image_limit', f'{self.eval_params.image_limit}',
-                '--max_tool_uses', f'{self.eval_params.max_tool_uses}',
-                '--batch_size', f'{self.eval_params.batch_size}',
-                '--tool_config', f'{self.eval_params.tool_config_type}',
-                '--max_pixels', f'{self.eval_params.max_pixels}',
-                '--min_pixels', f'{self.eval_params.min_pixels}',
-                '--bbox_type', f'{self.eval_params.bbox_type}',
-                '--strict_tool_extraction', f'{self.eval_params.strict_tool_extraction}',
-                '--tool_padding', f'{self.eval_params.tool_padding}',
-                '--tool_adaptive_padding_threshold', f'{self.eval_params.tool_adaptive_padding_threshold}',
-                '--max_tokens_per_reply', f'{self.eval_params.max_tokens_per_reply}',
-                '--num_generations', f'{self.eval_params.num_generations}',
-                '--temperature', f'{self.eval_params.temperature}'
-            ]
-            if self.eval_params.no_vllm:
-                cmd.append('--no_vllm')
-            if self.eval_params.enforce_eager:
-                cmd.append('--enforce_eager')
-            working_directory = None
-        else:
-
+        if self.eval_params.verl_eval:
             if self.dataset_params.data_files == "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/datasets/focusreason/MME-RealWorld/test_verl.json":
                 eval_script = "run_eval_mme.sh"
                 cuda_devices = "0,1"
@@ -240,6 +233,42 @@ class SingleEval:
                 #'--data_path', f'{self.dataset_params.data_files.removesuffix(".jsonl")}_verl.json'
             ]
             working_directory = '/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/mini_o3/Mini-o3'
+
+        else:
+            cmd += [
+                'python', '-m', 'open_r1.evaluation.evaluate',
+                '--model_path', f'{self.model_params.full_model_path}',
+                '--model_class', f'{self.model_params.model_class}',
+                '--output_path', f'{save_path}',
+
+                '--dataset_name', self.dataset_params.dataset_name,
+                # '--prompt_type', f"{prompt_type}",
+                '--data_filepath', self.dataset_params.data_files,
+                '--image_filepath', self.dataset_params.image_folders,
+
+                '--tensor_parallel_size', f'{self.eval_params.tensor_parallel_size}',
+                '--image_limit', f'{self.eval_params.image_limit}',
+                '--max_tool_uses', f'{self.eval_params.max_tool_uses}',
+                '--batch_size', f'{self.eval_params.batch_size}',
+                '--tool_config', f'{self.eval_params.tool_config_type}',
+                '--max_pixels', f'{self.eval_params.max_pixels}',
+                '--min_pixels', f'{self.eval_params.min_pixels}',
+                '--bbox_type', f'{self.eval_params.bbox_type}',
+                '--strict_tool_extraction', f'{self.eval_params.strict_tool_extraction}',
+                '--tool_padding', f'{self.eval_params.tool_padding}',
+                '--tool_adaptive_padding_threshold', f'{self.eval_params.tool_adaptive_padding_threshold}',
+                '--max_tokens_per_reply', f'{self.eval_params.max_tokens_per_reply}',
+                '--num_generations', f'{self.eval_params.num_generations}',
+                '--temperature', f'{self.eval_params.temperature}',
+                '--port', f'{self.eval_params.port}'
+            ]
+            if self.eval_params.no_vllm:
+                cmd.append('--no_vllm')
+            if self.eval_params.enforce_eager:
+                cmd.append('--enforce_eager')
+            if self.eval_params.qwen_3p5_eval:
+                cmd.append('--qwen_3p5_eval')
+            working_directory = None
 
         return cmd, working_directory
 
@@ -329,7 +358,10 @@ def unpack_datasets(list_of_datasets: list[Union[str, dict]]) -> tuple[list[str]
     for dataset in list_of_datasets:
         if isinstance(dataset, str):
             unpacked_list.append(dataset)
-            short_names.append(short_name_map[dataset])
+            if dataset in short_name_map:
+                short_names.append(short_name_map[dataset])
+            else:
+                short_names.append(dataset)
         elif isinstance(dataset, dict):
             if dataset["name"] == "muffin_chihuahua":
                 for gridsize in dataset["gridsize"]:
@@ -350,6 +382,7 @@ def unpack_datasets(list_of_datasets: list[Union[str, dict]]) -> tuple[list[str]
                 raise ValueError(f"Unknown dataset for unpacking {dataset}")
         else:
             raise ValueError(f"Datasets have to be either strings or dicts but got {dataset}")
+    print(f"unpack datasets to return: unpacked_list={unpacked_list}, short_names={short_names}")
     return unpacked_list, short_names
 
 
@@ -387,6 +420,7 @@ class Evals:
                 instances = tuple(cls(**kwargs) for cls in self.classes.values())
                 single_eval = SingleEval(**dict(zip(self.classes.keys(), instances)))
                 result.append(single_eval)
+        print(f"Generated {len(result)} evaluations from {self.input}")
         return result
 
     def __repr__(self):
@@ -447,7 +481,7 @@ class Evals:
         for eval in eval_list:
             save_path = eval.get_save_path()
             print(f"save_path: {save_path}")
-
+            # "full_results_relaxed.json"
             result = get_results(os.path.join(save_path, "full_results.json"), metrics, is_verl=eval.eval_params.verl_eval)
 
             if result is None and eval.eval_params.tool_padding==0.1:
@@ -511,8 +545,8 @@ def get_models_input():
             'strict_tool_extraction': [False],
             'tool_padding': [0.1],
             'max_tokens_per_reply': [1024],
-            'temperature': [1.0],
-            'num_generations': ["dataset_dependent"],
+            #'temperature': [1.0],
+            #'num_generations': ["dataset_dependent"],
             "evaluate": False,
             "analyze": False,
             "paper": True
@@ -555,8 +589,8 @@ def get_models_input():
             'bbox_type': [None],
             'strict_tool_extraction': [False],
             'max_tokens_per_reply': [1024],
-            'temperature': [1.0],
-            'num_generations': ["dataset_dependent"],
+            #'temperature': [1.0],
+            #'num_generations': ["dataset_dependent"],
             "max_pixels": [5120 * 28 * 28],
             "min_pixels": [512 * 28 * 28],
             "evaluate": False,
@@ -605,6 +639,53 @@ def get_models_input():
             'max_tokens_per_reply': [8192],
             "evaluate": False,
             "analyze": False,  # later
+        },
+
+        {
+            "short_name": "Qwen3p5_9B",
+            "model_path": "Qwen/Qwen3.5-9B",
+            "checkpoint": None,
+            "model_class": "Qwen/Qwen3.5-9B",
+            "output_path": "Qwen3p5_9B",
+            "qwen_3p5_eval": True,
+            "tool_config_type": ["zoom_in_absolute_q3p5"],  # , ], ,
+            "dataset_name": [  # "mme"
+                #"pixel_reasoner_vstar",
+                #"hr_bench_4k",
+                #"hr_bench_8k",
+                "mme",
+                # "mme_lite",
+                # "pixel_reasoner_infovqa",
+                #{"name": "muffin_chihuahua",
+                #"grid_pixels": [
+                #1,
+                #                  2,
+                #                  4,
+                #                 8
+                #],  #
+                #"gridsize": [
+                #    1,
+                #     2,
+                #      4,
+                #     8,
+                #      16
+                #],
+                #"mode": [
+                #    "single_cell_query",
+                #"find_outlier"
+                #          ]
+                #}
+            ],
+            "max_pixels": None, #[5000*32*32],
+            "min_pixels": None, #[500*32*32],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [True],
+            'tool_padding': [0.0],  # '32_turns'],  '0.0' '32_turns_extended_prompt'
+            'max_tokens_per_reply': [8192*4],
+            'max_tool_uses': [32],
+            'port': 8011,
+            "evaluate": False,
+            "analyze":False,  # later
         },
 
         {
@@ -2201,7 +2282,7 @@ def get_models_input():
             "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_20260120_224520",
             "checkpoint": [382],
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
-            "tool_config_type": ["zoom_in_absolute"],  # , "no_tool"], #,
+            "tool_config_type": ["no_tool", "zoom_in_absolute"],  # , "no_tool"], #,zoom_in_absolute
             "dataset_name": [  "pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
                 #"mme_lite",
                                "mme",
@@ -2219,8 +2300,8 @@ def get_models_input():
             'strict_tool_extraction': [False],
             'tool_padding': [0.1], #, 0.05, 0.0
             'max_tokens_per_reply': [1024],
-            'temperature': [1.0],
-            'num_generations': ["dataset_dependent"],
+            #'temperature': [1.0],
+            #'num_generations': ["dataset_dependent"],
             "evaluate": False,
             "analyze": False,  # later+
             "contains_full_chkp": True,
@@ -2283,12 +2364,13 @@ def get_models_input():
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
             "tool_config_type": ["no_tool", "zoom_in_absolute"],
             "dataset_name": [  # "pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
-                "mme_lite",
-                "pixel_reasoner_infovqa",
-                {"name": "muffin_chihuahua",
-                 "grid_pixels": [1, 2, 4, 8],
-                 "gridsize": [1, 2, 4, 8, 16],
-                 "mode": ["single_cell_query", "find_outlier"]}
+                #"mme_lite",
+                "mme"
+                #"pixel_reasoner_infovqa",
+                #{"name": "muffin_chihuahua",
+                # "grid_pixels": [1, 2, 4, 8],
+                # "gridsize": [1, 2, 4, 8, 16],
+                # "mode": ["single_cell_query", "find_outlier"]}
             ],
             "max_pixels": [5000 * 28 * 28],
             "min_pixels": [500 * 28 * 28],
@@ -2348,8 +2430,8 @@ def get_models_input():
             'strict_tool_extraction': [False],
             'max_tokens_per_reply': [1024],
             'tool_padding': [0.1],#, 0.05, 0.0],
-            'temperature': [1.0],
-            'num_generations': ["dataset_dependent"],
+            #'temperature': [1.0],
+            #'num_generations': ["dataset_dependent"],
             "evaluate": False,
             "analyze": False,  # later+
             "contains_full_chkp": True,
@@ -2944,7 +3026,8 @@ def get_models_input():
             "checkpoint": [382],
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
             "tool_config_type": ["no_tool", "zoom_in_absolute"],  # , "no_tool"],
-            "dataset_name": ["pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+            "dataset_name": [#"pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+                             "mme"
                              # "mme_lite",
                              # "pixel_reasoner_infovqa",
                              # {"name": "muffin_chihuahua",
@@ -3011,8 +3094,8 @@ def get_models_input():
             'strict_tool_extraction': [False],
             'tool_padding': [0.1],  # , 0.05, 0.1],  # , 0.1],
             'max_tokens_per_reply': [1024],
-            'temperature': [1.0],
-            'num_generations': ["dataset_dependent"],
+            #'temperature': [1.0],
+            #'num_generations': ["dataset_dependent"],
             "evaluate": False,
             "analyze": False,  # later
             "contains_full_chkp": True,
@@ -3052,9 +3135,9 @@ def get_models_input():
             "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_20_20260228_150728",
             "checkpoint": [382],
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
-            "tool_config_type": ["no_tool", "zoom_in_absolute"],  # , "no_tool"],
+            "tool_config_type": ["zoom_in_absolute", "no_tool"],#, "zoom_in_absolute"],  # , "no_tool"],
             "dataset_name": ["pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
-                             # "mme",
+                             "mme",
                              # "mme_lite",
                              # "pixel_reasoner_infovqa",
                              # {"name": "muffin_chihuahua",
@@ -3069,7 +3152,7 @@ def get_models_input():
             'tool_padding': [0.1],  # , 0.05, 0.1],  # , 0.1],
             'max_tokens_per_reply': [1024],
             "evaluate": False,
-            "analyze": False,  # later
+            "analyze": True,  # later
             "contains_full_chkp": True,
             "run_finished": False
         },
@@ -3104,9 +3187,9 @@ def get_models_input():
             "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_15_20260301_145725",
             "checkpoint": [382],
             "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
-            "tool_config_type": ["no_tool", "zoom_in_absolute"],  # , "no_tool"],
+            "tool_config_type": ["zoom_in_absolute", "no_tool"],#, "zoom_in_absolute"],  # , "no_tool"],
             "dataset_name": [  "pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
-                # "mme",
+                "mme",
                 # "mme_lite",
                 # "pixel_reasoner_infovqa",
                 #{"name": "muffin_chihuahua",
@@ -3121,7 +3204,7 @@ def get_models_input():
             'tool_padding': [0.1],  # , 0.05, 0.1],  # , 0.1],
             'max_tokens_per_reply': [1024],
             "evaluate": False,
-            "analyze": False,  # later
+            "analyze": True,  # later
             "contains_full_chkp": True,
             "run_finished": False
         },
@@ -3147,7 +3230,7 @@ def get_models_input():
             'tool_padding': [0.1],  # , 0.05, 0.1],  # , 0.1],
             'max_tokens_per_reply': [1024],
             "evaluate": False,
-            "analyze": True,  # later
+            "analyze": False,  # later
             "contains_full_chkp": True,
             "run_finished": False
         },
@@ -3175,16 +3258,70 @@ def get_models_input():
             'tool_padding': [0.1],  # , 0.05, 0.1],  # , 0.1],
             'max_tokens_per_reply': [1024],
             "evaluate": False,
+            "analyze": False,  # later
+            "contains_full_chkp": True,
+            "run_finished": False
+        },
+        {
+            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_per_seq",
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_per_seq_20260309_110313",
+            "checkpoint": [382],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["no_tool", "zoom_in_absolute"],  # , "no_tool"],
+            "dataset_name": [#"pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+                             "mme",
+                             # "mme_lite",
+                             # "pixel_reasoner_infovqa",
+                             # {"name": "muffin_chihuahua",
+                             # "grid_pixels": [1, 2, 4, 8],
+                             # "gridsize": [1, 2, 4, 8, 16],
+                             # "mode": ["single_cell_query", "find_outlier"]}
+                             ],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'tool_padding': [0.1],  # , 0.05, 0.1],  # , 0.1],
+            'max_tokens_per_reply': [1024],
+            "evaluate": False,
+            "analyze": False,  # later
+            "contains_full_chkp": True,
+            "run_finished": False
+        },
+        {
+            "short_name": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_continue_pr_no_exploration_reward",
+            "model_path": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_continue_pr_no_exploration_reward_20260313_003046",
+            "checkpoint": [554],
+            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "tool_config_type": ["no_tool"], #["no_tool", "zoom_in_absolute"],  # , "no_tool"],
+            "dataset_name": [  #"pixel_reasoner_vstar", "hr_bench_4k", "hr_bench_8k",
+                "mme_shard_0"
+                # "mme_lite",
+                # "pixel_reasoner_infovqa",
+                # {"name": "muffin_chihuahua",
+                # "grid_pixels": [1, 2, 4, 8],
+                # "gridsize": [1, 2, 4, 8, 16],
+                # "mode": ["single_cell_query", "find_outlier"]}
+            ],
+            "max_pixels": [5000 * 28 * 28],
+            "min_pixels": [500 * 28 * 28],
+            'bbox_type': ["absolute"],
+            'strict_tool_extraction': [False],
+            'tool_padding': [0.1],  # , 0.05, 0.1],  # , 0.1],
+            'max_tokens_per_reply': [1024],
+            "evaluate": True,
             "analyze": True,  # later
             "contains_full_chkp": True,
             "run_finished": False
         },
 
+
     ]
 
     return models_input
 
-def analyze(model_paths = None, metrics = None, datasets_for_analysis=None, do_print=None, tool_config_types=None, tool_paddings=None):
+def analyze(model_paths = None, metrics = None, datasets_for_analysis=None, do_print=None, tool_config_types=None,
+            tool_paddings=None, num_generations=None):
     if metrics is None:
         metrics = [
         "accuracy",
@@ -3193,7 +3330,7 @@ def analyze(model_paths = None, metrics = None, datasets_for_analysis=None, do_p
 
         "avg_pixel_reasoning",
         "pixel_reasoning_distr",
-        # "avg_first_completion_len",
+        "avg_first_completion_len",
         # "avg_second_completion_len",
         # "avg_total_completion_len",
 
@@ -3203,8 +3340,8 @@ def analyze(model_paths = None, metrics = None, datasets_for_analysis=None, do_p
         # "max_image_size",
         # "min_image_size",
         # "median_image_size",
-        # "accuracy_if_tool_used",
-        # "accuracy_if_tool_not_used",
+        #"accuracy_if_tool_used",
+        #"accuracy_if_tool_not_used",
         # "tool_success_rate",
 
         # "iou_std",
@@ -3234,7 +3371,7 @@ def analyze(model_paths = None, metrics = None, datasets_for_analysis=None, do_p
         "hr_bench_4k",
         "hr_bench_8k",
         # "mme_lite",
-        # "mme"
+         "mme"
         ]
     if do_print is None:
         do_print = True
@@ -3242,7 +3379,7 @@ def analyze(model_paths = None, metrics = None, datasets_for_analysis=None, do_p
     if tool_config_types is None:
         tool_config_types = [
             "no_tool",
-            "PR_crop_image_normalized,select_frames",
+            #"PR_crop_image_normalized,select_frames",
             "zoom_in_absolute"
         ]
 
@@ -3258,6 +3395,8 @@ def analyze(model_paths = None, metrics = None, datasets_for_analysis=None, do_p
             model["tool_config_type"] = tool_config_types
             if tool_paddings is not None and tool_paddings[idx] is not None:
                 model["tool_padding"] = tool_paddings[idx]
+            if num_generations is not None and num_generations[idx] is not None:
+                model["num_generations"] = num_generations[idx]
             #model["evaluate"] = False
 
 
@@ -3276,6 +3415,8 @@ def analyze(model_paths = None, metrics = None, datasets_for_analysis=None, do_p
                                   # "ANLS",
                                   "avg_pixel_reasoning",
                                   "zoom_in_fraction_median",
+                                   #"accuracy_if_tool_used",
+                                   #"accuracy_if_tool_not_used",
                                   "ious",
                                   "iou_std",
 
@@ -3363,6 +3504,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Evaluate VLM model performance')
     parser.add_argument('--model_path', type=str, default=None, help='Path to the model')
+    parser.add_argument('--dataset_name', type=str_or_dict, default=None, help='Name of the dataset to evaluate')
+    parser.add_argument('--tool_config_type', type=str, default=None, help='Type of tool configuration to evaluate')
 
     args = parser.parse_args()
 
@@ -3371,6 +3514,8 @@ if __name__ == "__main__":
         for m in models_input:
             if m["model_path"] == args.model_path:
                 m["evaluate"] = True
+                m["dataset_name"] = [args.dataset_name]
+                m["tool_config_type"] = [args.tool_config_type]
                 if found_one:
                     raise ValueError(f"multiple models with the same name!")
                 else:
@@ -3388,11 +3533,11 @@ if __name__ == "__main__":
 
         PMI_analysis = False
     else:
-        do_eval = False
+        do_eval = True
         batch_eval = True
         exist_ok = True
 
-        do_analysis = True
+        do_analysis = False
         batch_analyze = True
 
         do_metric_comparison = False

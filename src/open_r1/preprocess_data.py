@@ -122,7 +122,7 @@ def make_hf_dataset(dataset_names, data_folders, image_folders, reward_method=No
                     item["accu_reward_method"] = accu_reward_method
 
                     all_data.append(item)
-        elif dataset_name in ["mme", "mme_lite"]:
+        elif dataset_name.startswith("mme"):
             with open(data_file, 'r') as f:
                 for line in f:
                     item = json.loads(line)

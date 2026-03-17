@@ -245,7 +245,7 @@ class MultiTurn:
 
             wrapped_prompt = maybe_apply_chat_template({"prompt": [prompt]},
                                       tokenizer=self.processor,
-                                      add_generation_prompt=None,
+                                      #add_generation_prompt=None,
                                       return_assistant_tokens_mask=False,
                                       tools=[tool.get_tool_dict() for tool in self.tools] if self.tools is not None else None)["prompt"]
 

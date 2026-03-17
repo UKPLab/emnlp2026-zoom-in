@@ -11,21 +11,32 @@ import numpy as np
 from PIL import Image
 
 
-QWEN2_5_MIN_PIXELS = 4*28*28
-QWEN2_5_MAX_PIXELS = 16*1024*28*28
+QWEN2_5_FACTOR = 28
+QWEN3_5_FACTOR = 32
 
-def get_resized_image_scales(height:int, width:int, min_pixels:int=None, max_pixels:int=None):
+def get_resized_image_scales(height:int, width:int, min_pixels:int=None, max_pixels:int=None, base_model="qwen_2p5"):
+    if base_model == "qwen_2p5":
+        factor = QWEN2_5_FACTOR
+    elif base_model == "qwen_3p5":
+        factor = QWEN3_5_FACTOR
+    else:
+        raise NotImplementedError
 
     if min_pixels is None:
-        min_pixels = QWEN2_5_MIN_PIXELS
+        if base_model == "qwen_3p5":
+            min_pixels = 64 * factor * factor
+        elif base_model == "qwen_2p5":
+            min_pixels = 4 * factor * factor
+
     if max_pixels is None:
-        max_pixels = QWEN2_5_MAX_PIXELS
+        max_pixels = 16 * 1024 * factor * factor
 
 
     resized_height, resized_width = smart_resize(height=height,
                                                  width=width,
                                                  min_pixels=min_pixels,
-                                                 max_pixels=max_pixels)
+                                                 max_pixels=max_pixels,
+                                                 factor=factor)
 
     return resized_height, resized_width
 

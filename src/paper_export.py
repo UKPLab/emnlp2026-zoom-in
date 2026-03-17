@@ -3,18 +3,55 @@ import pandas as pd
 from initiate_analysis import analyze
 
 def main_results_table():
-    models = [{"model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool_20260227_014456",
-               "short_name": "no tool"},
-              {"model_path": "Qwen/Qwen2.5-VL-7B-Instruct",
-                "short_name": "Qwen no train"},
-              {"model_path": "TIGER-Lab/PixelReasoner-RL-v1",
-               "short_name": "PixelReasoner"},
-              {"model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_20260120_224520",
-               "short_name": "Curiosity",
-               "tool_padding": [0.1]},
-              {"model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_20260123_184044",
-               "short_name": "Ours",
-               "tool_padding": [0.1]}
+    models = [
+        #{"model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool_20260227_014456",
+        #       "short_name": "no tool",
+        #       "num_generations": "dataset_dependent"},
+        #      {"model_path": "Qwen/Qwen2.5-VL-7B-Instruct",
+        #        "short_name": "Qwen no train",
+        #       "num_generations": "dataset_dependent"},
+        #      {"model_path": "TIGER-Lab/PixelReasoner-RL-v1",
+        #       "short_name": "PixelReasoner",
+        #       "num_generations": "dataset_dependent"},
+        #      {"model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_20260120_224520",
+        #       "short_name": "Curiosity",
+        #       "tool_padding": [0.1],
+        #       "num_generations": "dataset_dependent"},
+        #      {"model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_20260123_184044",
+        #       "short_name": "Ours",
+        #       "tool_padding": [0.1],
+        #       "num_generations": "dataset_dependent"}
+
+        #{
+        #    "model_path": "Qwen/Qwen3.5-9B",
+        #       "short_name": "Qwen3p5",
+        #    "tool_padding": [0.0]
+        #},
+        #{
+        #    "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_per_seq_20260309_110313",
+        #    "short_name": "per seq",
+        #},
+        #{
+        #    "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_100_100_100_20260123_184438",
+        #    "short_name": "only easy negatives",
+        #},
+        #{
+        #    "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_negatives_2_20260225_100616",
+        #    "short_name": "two negatives",#
+        #}
+        #{
+        #    "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_15_20260301_145725",
+        #    "short_name": "15",#
+        # },
+        # {
+        #    "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_20_20260228_150728",
+        #    "short_name": "20",#
+        # },
+        {
+            "model_path": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_continue_pr_no_exploration_reward_20260313_003046",
+            "short_name": "Ours contd",  #
+        }
+
 
               ]
     datasets = ["V*", "hrb_4k", "hrb_8k", "mme"]#, "InfoVQA"]
@@ -26,17 +63,21 @@ def main_results_table():
         "mme": "mme"}
     tool_config_types = [
         "no_tool",
-        "PR_crop_image_normalized,select_frames",
-        "zoom_in_absolute",
+        #"PR_crop_image_normalized,select_frames",
+        "zoom_in_absolute_q3p5",
+        "zoom_in_absolute"
     ]
     metrics = ["accuracy"]
     model_paths = [model["model_path"] for model in models]
     short_names = [model["short_name"] for model in models]
     paddings = [model["tool_padding"] if "tool_padding" in model and model["tool_padding"] is not None else None for model in models]
+    num_generations = [model["num_generations"] if "num_generations" in model and model["num_generations"] is not None else None for
+                model in models]
 
     results_df = analyze(model_paths=model_paths, tool_config_types=tool_config_types,
                          datasets_for_analysis=[datasets_map[d] for d in datasets],
-                         do_print=False, tool_paddings = paddings, metrics=metrics)
+                         do_print=False, tool_paddings = paddings, metrics=metrics,
+                         num_generations=num_generations)
 
     cols = []
     for dataset in datasets:
@@ -114,28 +155,44 @@ def acc_at_t():
 
 def muffin_main(task:str):
     models = [
-        {"model_path": "Qwen/Qwen2.5-VL-7B-Instruct",
-         "short_name": "Qwen no train"},
+        #{"model_path": "Qwen/Qwen2.5-VL-7B-Instruct",
+        # "short_name": "Qwen no train",
+        # "num_generations": "dataset_dependent"},
 
-        {"model_path": "TIGER-Lab/PixelReasoner-RL-v1",
-         "short_name": "PixelReasoner"},
+        #{"model_path": "TIGER-Lab/PixelReasoner-RL-v1",
+        # "short_name": "PixelReasoner",
+        # "num_generations": "dataset_dependent"},
 
-        {"model_path": "Mini-o3/Mini-o3-7B-v1",
-         "short_name": "Mini o3",
-         "tool_padding": ['32_turns_sample_4']},
+        #{"model_path": "Mini-o3/Mini-o3-7B-v1",
+        # "short_name": "Mini o3",
+        # "tool_padding": ['32_turns_sample_4']},
 
         #wait for eval
-        {"model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool_20260227_014456",
-         "short_name": "no tool"},
+        #{"model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_no_tool_20260227_014456",
+        # "short_name": "no tool",
+        # "num_generations": "dataset_dependent"},
 
         {"model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_20260120_224520",
          "short_name": "Curiosity",
          "tool_padding": [0.1]},
 
-        {"model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_20260123_184044",
-         "short_name": "Ours",
-         "tool_padding": [0.1]},
+        #{"model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_20260123_184044",
+        # "short_name": "Ours",
+        # "tool_padding": [0.1],
+        # "num_generations": "dataset_dependent"},
 
+        #{"model_path": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_continue_pr_no_exploration_reward_20260313_003046",
+        #"short_name": "Ours contd",
+        #"tool_padding": [0.1],
+        #"num_generations": "dataset_dependent"
+        # },
+
+
+        #{
+        #    "model_path": "Qwen/Qwen3.5-9B",
+        #    "short_name": "Qwen3p5",
+        #    "tool_padding": [0.0]
+        #},
         ]
 
     datasets = [{"name": "muffin_chihuahua",
@@ -144,19 +201,23 @@ def muffin_main(task:str):
                               "mode": ["single_cell_query", "find_outlier"]}]
     tool_config_types = [
         "no_tool",
-        "PR_crop_image_normalized,select_frames",
+        #"PR_crop_image_normalized,select_frames",
         "zoom_in_absolute",
-        "zoom_in_relative"
+        #"zoom_in_relative",
+        #"zoom_in_absolute_q3p5"
     ]
     metrics = ["accuracy"]
     model_paths = [model["model_path"] for model in models]
     short_names = [model["short_name"] for model in models]
     paddings = [model["tool_padding"] if "tool_padding" in model and model["tool_padding"] is not None else None for
                 model in models]
+    num_generations = [
+        model["num_generations"] if "num_generations" in model and model["num_generations"] is not None else None for
+        model in models]
 
     results_df = analyze(model_paths=model_paths, datasets_for_analysis=datasets,
                          do_print=False, tool_paddings=paddings, tool_config_types=tool_config_types,
-                         metrics=metrics)
+                         metrics=metrics, num_generations=num_generations)
 
     results_df.rename(mapper=dict(zip(range(len(short_names)), short_names)), axis=0, inplace=True)
 
@@ -257,26 +318,29 @@ def mini_o3_no_answer():
 def muffin_overlap_metrics(task):
     models = [
 
-        #{"model_path": "TIGER-Lab/PixelReasoner-RL-v1",
-        # "short_name": "PixelReasoner"},
-
-        #{"model_path": "Mini-o3/Mini-o3-7B-v1",
-        # "short_name": "Mini o3",
-        # "tool_padding": ['32_turns']},
+        {"model_path": "TIGER-Lab/PixelReasoner-RL-v1",
+         "short_name": "PixelReasoner"},
 
         {"model_path": "Mini-o3/Mini-o3-7B-v1",
          "short_name": "Mini o3",
          "tool_padding": ['32_turns_sample_4']},
 
-        #{
-        #    "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_20260120_224520",
-        #    "short_name": "Curiosity",
-        #    "tool_padding": [0.1]},
+        {
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_20260120_224520",
+            "short_name": "Curiosity",
+            "tool_padding": [0.1]},
 
-        #{
-        #    "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_20260123_184044",
-        #    "short_name": "Ours",
-        #    "tool_padding": [0.1]},
+        {
+            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_20260123_184044",
+            "short_name": "Ours",
+            "tool_padding": [0.1]},
+
+        {
+            "model_path": "Qwen_2p5_7B_mini_o3_full_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_30_100_17p5_continue_pr_no_exploration_reward_20260313_003046",
+            "short_name": "Ours contd",
+            "tool_padding": [0.1],
+            # "num_generations": "dataset_dependent"
+            },
     ]
 
     datasets = [{"name": "muffin_chihuahua",
@@ -322,11 +386,45 @@ def muffin_overlap_metrics(task):
                 aggregate_cols[metric].append((f"{img_size}k_{grid_size}_{task}", "tool", metric))
 
 
+    """snr_variants = []
+    for metric in metrics:
+        if "_" in metric or metric == "accuracy":
+            continue
+        else:
+            metric_mean = metric
+            if metric == "ious":
+                metric_std = "iou_std"
+            else:
+                metric_std = f"{metric}_std"
+            for c_mean, c_std in zip(aggregate_cols[metric_mean], aggregate_cols[metric_std]):
+                snr = f"{metric}_SNR"
+                if snr not in snr_variants:
+                    snr_variants.append(snr)
+                col_name = (c_mean[0], c_mean[1], snr)
+                results_df[col_name] = results_df[c_mean]-results_df[c_std]
+                if snr not in aggregate_cols:
+                    aggregate_cols[snr] = []
+                aggregate_cols[snr].append((c_mean[0], c_mean[1], snr))
+
+    metrics += snr_variants"""
+    #metrics.append("SNR")
+
+
+    #print(f"metrics: {metrics}")
+    #print(f"results_df: {results_df}")
+
     for metric in metrics:
         if "_" in metric:
-            metric_display_name = (metric.split("_")[0], "std", "value")
+            split_metric = metric.split("_")
+            if split_metric[1] == "std":
+                metric_display_name = (split_metric[0], "std", "value")
+            elif split_metric[1] == "SNR":
+                metric_display_name = (split_metric[0], "SNR", "value")
+            else:
+                continue
         else:
             metric_display_name = (metric, "mean", "value")
+        print(f"metric_display_name: {metric_display_name}")
         final_df[metric_display_name] = results_df[aggregate_cols[metric]].mean(axis=1)
         if metric != "accuracy":
             acc_df = results_df[aggregate_cols["accuracy"]].copy()
@@ -334,10 +432,21 @@ def muffin_overlap_metrics(task):
             acc_df.columns = acc_df.columns.droplevel(-1)
             other_df.columns = other_df.columns.droplevel(-1)
 
-            metric_display_name = (metric_display_name[0], metric_display_name[1], "pearson")
-            final_df[metric_display_name] = acc_df.corrwith(other_df, axis=1, method="pearson")
+            metric_display_name_p = (metric_display_name[0], metric_display_name[1], "pearson")
+            print(f"metric_display_name_p: {metric_display_name_p}")
+            final_df[metric_display_name_p] = acc_df.corrwith(other_df, axis=1, method="pearson")
+            #print(f"metric display name: {metric_display_name}")
+            #final_df.at["Cross-model pearson", metric_display_name] = final_df[[("accuracy", "mean", "value"), metric_display_name]].corr(method="pearson")
+            corr_val = final_df[("accuracy", "mean", "value")].corr(
+                final_df[metric_display_name],
+                method="pearson"
+            )
 
+            final_df.at["Cross-model pearson", metric_display_name] = corr_val
 
+    print(final_df.columns)
+    final_df = final_df.drop(["mean", "precision", "value"], axis = 1)
+    print(final_df.columns)
     #for corr in ["pearson", "spearman"]:
     #    corr_row = {}
     #    for metric in metrics:
