@@ -1,6 +1,6 @@
 # Tests are defined here
-from ukp_project_template import BaseClass
-from ukp_project_template.subpackage import SubPackageClass
+from arxiv2026_zoom_in import BaseClass
+from arxiv2026_zoom_in.subpackage import SubPackageClass
 
 def test_template():
     assert True
