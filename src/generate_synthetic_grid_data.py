@@ -2,14 +2,12 @@ import math
 import os
 import json
 import shutil
-import sys
 import uuid
 from tqdm import tqdm
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance, ImageFilter
 import random
 from pathlib import Path
-import requests
 import argparse
 from urllib.parse import urlparse
 import subprocess
@@ -202,6 +200,7 @@ def initial_preprocess(download_dir:str):
     dataset = []
 
     classes = ["Chihuahua", "Muffin"]
+    idx = 0
     for cls in classes:
 
         print(cls)
@@ -209,9 +208,11 @@ def initial_preprocess(download_dir:str):
         for img_path in os.listdir(cls_path):
             full_image_path = os.path.join(cls_path, img_path)
             print(img_path)
-            image_name = uuid.uuid4().hex + ".jpg"
+            #image_name = uuid.uuid4().hex + ".jpg"
+            image_name = f"img{idx}.jpg"
             shutil.copy(full_image_path, os.path.join(new_image_path, image_name))
             dataset.append({"class": cls, "image": image_name})
+            idx += 1
 
     save_as_jsonl(dataset, os.path.join(download_dir, "test.jsonl"))
 
@@ -362,7 +363,7 @@ def download_images(images: list[dict], directory: str = ".") -> None:
         # Use curl since you mentioned it works
         try:
             result = subprocess.run(
-                ['curl', '-L', '-o', str(output_path), url],
+                ['curl', '-f', '--max-redirs', '0', '-o', str(output_path), url],
                 check=True,
                 capture_output=True,
                 text=True
@@ -379,6 +380,7 @@ if __name__ == "__main__":
                         help='Path to the raw dataset directory')
     parser.add_argument('--save_path_prefix', type=str, default=None,
                         help='Path prefix where the generated splits will be saved')
+    parser.add_argument('--base_seed', type=int, default=42, help='Base seed for reproducibility')
     args = parser.parse_args()
 
     # Set default paths if not provided via CLI
@@ -401,7 +403,6 @@ if __name__ == "__main__":
     initial_preprocess(download_dir)
 
     total_images = 100
-    base_seed = 42
 
     configs = []
     for bis in [1,2,4,8]:
@@ -411,11 +412,11 @@ if __name__ == "__main__":
             if gs > 1:
                configs.append({"big_image_size": bis, "grid_size": gs, "num_samples_class_0": int(gs**2 / 2)})
 
-    make_grid_data(configs, download_dir=download_dir, total_images=total_images, save_path_prefix=save_path_prefix, base_seed=base_seed)
+    make_grid_data(configs, download_dir=download_dir, total_images=total_images, save_path_prefix=save_path_prefix, base_seed=args.base_seed)
 
     make_vqa_dataset(configs, save_path_prefix=save_path_prefix,
                      variant="both",
                      total_images=total_images,
-                     base_seed=base_seed)
+                     base_seed=args.base_seed)
 
 
