@@ -4,46 +4,32 @@ import mimetypes
 import re
 import subprocess
 import urllib.request
-from pathlib import Path
-
-from openai.types.chat import ChatCompletionMessage
-
-from open_r1.utils.logger import get_logger, setup_project_logging
 import torch
 import argparse
-from open_r1.utils.multi_turn_handler import Prompt, Conversations
-from open_r1.utils.masker import get_boundaries_tokenized
-from open_r1.utils.tools import Tool, Message, TOOL_CONFIGS
 import copy
-import os
 import numpy as np
 import PIL
+import time
+import json
+import gc
+import os
+
+from pathlib import Path
+from openai.types.chat import ChatCompletionMessage
+from open_r1.utils.logger import setup_project_logging
+from open_r1.utils.tools import Tool, Message, TOOL_CONFIGS
 from open_r1.utils.rewards import accuracy_reward
 from trl.data_utils import is_conversational
-
 from open_r1.utils.utils import calculate_overlap_metrics
 from open_r1.vlm_modules import Qwen2VLModule
 from transformers import AutoProcessor
 from vllm import LLM, SamplingParams
 from open_r1.preprocess_data import prepare_data
 from torch.utils.data import DataLoader
-import time
-import json
 from open_r1.utils.prompts import get_question_template
-import gc
-import sys
-
 from openai import AsyncOpenAI, OpenAI
-
-from open_r1.utils.multi_turn_manager import MultiTurn, pad
-
+from open_r1.utils.multi_turn_manager import MultiTurn
 from vllm.inputs import TokensPrompt
-
-
-
-import os
-
-
 
 class VLLM:
 
@@ -74,7 +60,7 @@ class VLLM:
             # This is particularly useful here because we generate completions from the same prompts.
             enable_prefix_caching=self.enable_prefix_caching,
             max_model_len=self.max_model_len,
-            worker_extension_cls="trl.scripts.vllm_serve.WeightSyncWorkerExtension",
+            #worker_extension_cls="trl.scripts.vllm_serve.WeightSyncWorkerExtension",
             disable_custom_all_reduce=self.disable_custom_all_reduce,
             enforce_eager=self.enforce_eager,
             limit_mm_per_prompt=self.limit_mm_per_prompt,
