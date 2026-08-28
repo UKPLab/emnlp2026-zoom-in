@@ -19,7 +19,7 @@
     "generation_batch_size": 280,
     "gradient_checkpointing": true,
     "torch_dtype": "bfloat16",
-    "attn_implementation": "flash_attention_2",
+    "attn_implementation": "sdpa",
     "bf16": true,
     "logging_steps": 1,
     "logging": true,
@@ -28,22 +28,35 @@
     "multi_turn": "tool",
     "reward_funcs": [
       "accuracy",
-      "pr_penalty",
-      "curiosity"
+      "mutual_information"
     ],
     "reward_func_weights": [
       1.0,
-      0.05,
-      0.5
+      0.1
     ],
-    "tool_use_penalty_threshold": 1,
-    "pixel_reasoning_threshold": 0.3,
+    "reward_func_conditionals": [
+      false,
+      true
+    ],
+    "mi_alternative_action": "alternative_tool_call",
+    "mi_use_advantages_directly": false,
+    "mi_contrasted_score": "log_probs",
+    "mi_use_info_nce": true,
+    "iou_target_zero": 0.3,
+    "iou_target_one": 1.0,
+    "iou_target_increase": "linear",
+    "iou_target_max_value": 0.175,
+    "mutual_information_clip_value": 1.5,
+    "mi_tanh": true,
+    "mutual_information_length_factor": 1.0,
+    "mi_masked_vision_forward_model": "self",
+    "mi_full_forward_model": "self",
     "chat_template": "/path/to/focusreason/src/qwen_chat_template_tool.json",
     "per_device_eval_batch_size": 4,
     "learning_rate": 1e-6,
     "lr_scheduler_type": "constant_with_warmup",
     "warmup_ratio": 0.03,
-    "max_tool_uses": 2,
+    "max_tool_uses": 1,
     "max_pixels": 3920000,
     "min_pixels": 392000,
     "epsilon": 0.2,
@@ -61,7 +74,7 @@
     "min_pixels": "infer",
     "max_pixels": "infer",
     "enable_prefix_caching": true,
-    "limit_image_per_prompt": 4
+    "limit_image_per_prompt": 3
   }
 }
 

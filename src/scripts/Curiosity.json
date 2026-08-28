@@ -1,11 +1,11 @@
 {
   "train_params": {
     "output_dir_prefix": "/path/to/focusreason/runs",
-    "model_name_or_path": "/path/to/focusreason/runs/Qwen_2p5_7B_pr_data_cold_absolute_pixels_500_5k_image_mi_iou_cond_infonce_1_epoch_30_100_17p5_20260123_184044/checkpoint-382/",
+    "model_name_or_path": "Qwen/Qwen2.5-VL-7B-Instruct",
     "deepspeed": "/path/to/focusreason/src/scripts/zero3.json",
-    "dataset_name": "visual_probe_train:deepeyes_train_4k",
-    "data_file_paths": "/path/to/datasets/focusreason/mini_o3/visual_probe_train/train.jsonl:/path/to/datasets/focusreason/mini_o3/deepeyes_train_4k/train.jsonl",
-    "image_folders": "/path/to/datasets/focusreason/mini_o3/visual_probe_train:/path/to/datasets/focusreason/mini_o3/deepeyes_train_4k",
+    "dataset_name": "pixel_reasoner",
+    "data_file_paths": "/path/to/datasets/pixel_reasoner/RL_data_without_video/train.jsonl",
+    "image_folders": "/path/to/datasets/pixel_reasoner/RL_data_without_video",
     "max_completion_length": 1024,
     "ds3_gather_for_generation": true,
     "use_vllm": true,
@@ -19,7 +19,7 @@
     "generation_batch_size": 280,
     "gradient_checkpointing": true,
     "torch_dtype": "bfloat16",
-    "attn_implementation": "flash_attention_2",
+    "attn_implementation": "sdpa",
     "bf16": true,
     "logging_steps": 1,
     "logging": true,
@@ -27,20 +27,23 @@
     "temperature": 1.0,
     "multi_turn": "tool",
     "reward_funcs": [
-      "accuracy"
+      "accuracy",
+      "pr_penalty",
+      "curiosity"
     ],
     "reward_func_weights": [
-      1.0
+      1.0,
+      0.05,
+      0.5
     ],
-    "reward_func_conditionals": [
-      false
-    ],
+    "tool_use_penalty_threshold": 1,
+    "pixel_reasoning_threshold": 0.3,
     "chat_template": "/path/to/focusreason/src/qwen_chat_template_tool.json",
     "per_device_eval_batch_size": 4,
     "learning_rate": 1e-6,
     "lr_scheduler_type": "constant_with_warmup",
     "warmup_ratio": 0.03,
-    "max_tool_uses": 1,
+    "max_tool_uses": 2,
     "max_pixels": 3920000,
     "min_pixels": 392000,
     "epsilon": 0.2,
@@ -58,7 +61,7 @@
     "min_pixels": "infer",
     "max_pixels": "infer",
     "enable_prefix_caching": true,
-    "limit_image_per_prompt": 3
+    "limit_image_per_prompt": 4
   }
 }
 
