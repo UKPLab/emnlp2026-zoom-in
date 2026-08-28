@@ -264,6 +264,27 @@ class GRPOConfig(TrainingArguments):
             "`transformers.TrainingArguments`."
         },
     )
+    warmup_ratio: Optional[float] = field(
+        default=0.0,
+        metadata={
+            "help": "Proportion of training steps to perform linear learning rate warmup for. E.g., `0.1` means "
+            "warmup for 10% of all training steps. If `0.0`, no warmup is performed."
+        },
+    )
+    warmup_steps: Optional[int] = field(
+        default=0,
+        metadata={
+            "help": "Number of steps used for a linear warmup from 0 to the initial learning rate. If `0`, no warmup "
+            "is performed. Overrides any value set for `warmup_ratio`."
+        },
+    )
+    lr_scheduler_type: Optional[str] = field(
+        default="linear",
+        metadata={
+            "help": "The scheduler type to use. Choose between ['linear', 'cosine', 'cosine_with_restarts', 'polynomial', "
+            "'constant', 'constant_with_warmup']"
+        },
+    )
     beta: float = field(
         default=0.04,
         metadata={
@@ -386,6 +407,25 @@ class GRPOConfig(TrainingArguments):
             "help": "This parameter is deprecated and will be removed in version 0.18.0. To control prefix caching in "
             "vLLM, you should now use the `enable_prefix_caching` parameter in the vLLM server configuration."
         },
+    )
+    steps_per_generation: Optional[int] = field(
+        default=1,
+        metadata={
+            "help": "How many mini-batch (i.e. on grad acc level) steps are performed after a single generation. "
+                    "In other words, how many sequences to generate in advance."
+        }
+    )
+    generation_batch_size: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "the batch size for generating completions"
+        }
+    )
+    shuffle_dataset: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "Whether to shuffle the dataset."
+        }
     )
 
     def __post_init__(self):

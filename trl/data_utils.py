@@ -72,6 +72,8 @@ def apply_chat_template(
     example: dict[str, list[dict[str, str]]],
     tokenizer: PreTrainedTokenizerBase,
     tools: Optional[list[Union[dict, Callable]]] = None,
+    add_generation_prompt: bool = None,
+    return_assistant_tokens_mask: bool = False,
 ) -> dict[str, str]:
     r"""
     Apply a chat template to a conversational example along with the schema for a list of functions in `tools`.
@@ -99,7 +101,8 @@ def apply_chat_template(
     if "prompt" in example:
         last_role = example["prompt"][-1]["role"]
         if last_role == "user":
-            add_generation_prompt = True
+            if add_generation_prompt is None:
+                add_generation_prompt = True
             continue_final_message = False
         elif last_role == "assistant":
             add_generation_prompt = False
@@ -112,6 +115,8 @@ def apply_chat_template(
             continue_final_message=continue_final_message,
             tokenize=False,
             add_generation_prompt=add_generation_prompt,
+            return_assistant_tokens_mask=return_assistant_tokens_mask,
+            return_dict=return_assistant_tokens_mask,
         )
 
     # Apply the chat template to the entire prompt + completion
@@ -173,6 +178,8 @@ def maybe_apply_chat_template(
     example: dict[str, list[dict[str, str]]],
     tokenizer: PreTrainedTokenizerBase,
     tools: Optional[list[Union[dict, Callable]]] = None,
+    add_generation_prompt: bool = None,
+    return_assistant_tokens_mask: bool = False,
 ) -> dict[str, str]:
     r"""
     If the example is in a conversational format, apply a chat template to it.
@@ -222,7 +229,7 @@ def maybe_apply_chat_template(
     ```
     """
     if is_conversational(example):
-        return apply_chat_template(example, tokenizer, tools)
+        return apply_chat_template(example, tokenizer, tools, add_generation_prompt, return_assistant_tokens_mask)
     else:
         return example
 
