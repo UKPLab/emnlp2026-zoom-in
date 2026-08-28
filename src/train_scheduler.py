@@ -208,7 +208,7 @@ def get_commands(hparams: dict, run_name: str, available_gpus=None, reuse_vllm=F
         output_dir = hparams["train_params"]["output_dir"]
         assert "aim_run_hash" in hparams["train_params"] and hparams["train_params"]["aim_run_hash"] is not None
         hparams["train_params"]["model_name_or_path"] = os.path.join(hparams["train_params"]["output_dir"],
-                                                                     f"checkpoint-{hparams["train_params"]["resume_from_checkpoint"]}")
+                                                                     f'checkpoint-{hparams["train_params"]["resume_from_checkpoint"]}')
         hparams["train_params"].pop("resume_from_checkpoint")
 
     vllm_cmd = "trl vllm-serve"
@@ -242,7 +242,7 @@ def get_commands(hparams: dict, run_name: str, available_gpus=None, reuse_vllm=F
         elif name == "output_dir_prefix":
             if resume:
                 continue
-            inferred_value = os.path.join(f"{value}", f"{run_name}_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}")
+            inferred_value = os.path.join(f"{value}", f'{run_name}_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}')
             output_dir = inferred_value
             inferred_name = "output_dir"
         else:
@@ -276,7 +276,7 @@ if __name__ == "__main__":
 
     runs = [
         {
-            "json_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const.json",
+            "json_name": "Ours_local.json",
             "shell_number": 1,
             "path": "",
             "state": "to_be_launched"
@@ -290,11 +290,11 @@ if __name__ == "__main__":
                     print(f"dry run, do nothing: {run}")
                     continue
                 else:
-                    vllm_screen_name = f"{run['shell_number']}_auto_vllm_2"
-                    train_screen_name = f"{run['shell_number']}_auto_run_2"
+                    vllm_screen_name = f"{run['shell_number']}_auto_vllm"
+                    train_screen_name = f"{run['shell_number']}_auto_run"
 
-                    available_gpus = None #, "2", "3", "4"]
-                    reuse_vllm = True
+                    available_gpus = None
+                    reuse_vllm = False
                     ignore_vllm = False
                     keep_vllm_alive = False
 

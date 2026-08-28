@@ -1,8 +1,8 @@
 {
   "train_params": {
-    "output_dir_prefix": "/path/to/focusreason/runs",
+    "output_dir_prefix": "/path/to/output",
     "model_name_or_path": "Qwen/Qwen2.5-VL-7B-Instruct",
-    "deepspeed": "/path/to/focusreason/src/scripts/zero3.json",
+    "deepspeed": "/path/to/src/scripts/zero3.json",
     "dataset_name": "pixel_reasoner",
     "data_file_paths": "/path/to/datasets/pixel_reasoner/RL_data_without_video/train.jsonl",
     "image_folders": "/path/to/datasets/pixel_reasoner/RL_data_without_video",
@@ -38,7 +38,7 @@
     ],
     "tool_use_penalty_threshold": 1,
     "pixel_reasoning_threshold": 0.3,
-    "chat_template": "/path/to/focusreason/src/qwen_chat_template_tool.json",
+    "chat_template": "/path/to/src/qwen_chat_template_tool.json",
     "per_device_eval_batch_size": 4,
     "learning_rate": 1e-6,
     "lr_scheduler_type": "constant_with_warmup",

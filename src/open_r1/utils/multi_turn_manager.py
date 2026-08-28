@@ -241,33 +241,28 @@ class MultiTurn:
         for idx in range(self.batch_size):
             prompt = prompts[idx]
 
-            #logger.info(f"prompt: {repr(prompt)}")
-
             wrapped_prompt = maybe_apply_chat_template({"prompt": [prompt]},
                                       tokenizer=self.processor,
-                                      #add_generation_prompt=None,
                                       return_assistant_tokens_mask=False,
                                       tools=[tool.get_tool_dict() for tool in self.tools] if self.tools is not None else None)["prompt"]
 
-            #logger.info(f"wrapped prompt: {repr(wrapped_prompt)}")
+
             split_prompt = wrapped_prompt.split(SPECIAL_TOKENS["turn_start"]["text"])
-            #logger.info(f"split prompt: {repr(split_prompt)}")
+
             system_text = split_prompt[1].removesuffix(SPECIAL_TOKENS["turn_end"]["text"]+
                                                        SPECIAL_TOKENS["turn_separator"]["text"]).removeprefix(SPECIAL_TOKENS["system"]["text"]+
                                                                                                               SPECIAL_TOKENS["newline"]["text"])
-            #logger.info(f"system_text: {repr(system_text)}")
+
             system_turn = Turn(role="system", text=system_text)
 
             user_text = split_prompt[2].removesuffix(SPECIAL_TOKENS["turn_end"]["text"]+
                                                      SPECIAL_TOKENS["turn_separator"]["text"]).removeprefix(SPECIAL_TOKENS["user"]["text"]+
                                                                                                             SPECIAL_TOKENS["newline"]["text"])
-            #logger.info(f"user_text: {repr(user_text)}")
+
             user_turn = Turn(role="user", text=user_text)
 
             system_user_texts.append(system_text)
             system_user_texts.append(user_text)
-            #for img_path in image_paths[idx]:
-            #    system_user_image_paths.append(Image.open(img_path))
 
             self.all_multi_turn[idx].append(system_turn)
             self.all_multi_turn[idx].append(user_turn)
@@ -329,8 +324,6 @@ class MultiTurn:
         Example: [1,2,4] indicates 0->1, 1->2 and 2->4"""
         if mapping is None:
             mapping = range(len(token_ids))
-        #logger.info(f"in add model reply: mapping: {mapping}")
-        #logger.info(f"in add model reply: len token_ids: {len(token_ids)}")
         text_completions = self.processor.batch_decode(token_ids, skip_special_tokens=True)
         for idx in range(len(token_ids)):
 
@@ -352,7 +345,6 @@ class MultiTurn:
                          absolute_bbox_wrt_target_coordss: list[tuple[int, int, int, int]]=None,
                          target_image_idxs: list[int] = None
                          ):
-        #logger.info(f"in add user message: prompts: {prompts}, image_paths: {image_paths}")
 
         if mapping is None:
             mapping = range(len(prompts))
@@ -418,7 +410,7 @@ class MultiTurn:
         # we need to make the mapping of the images with the turns, as the input list is flattened
         img_count_old = 0
         img_count_new = 0
-        # TODO: this fails if the user message does not contain an image path. This should only happen in the think_again text mode
+        # this fails if the user message does not contain an image path. This should only happen in the think_again text mode
         for idx in range(len(mapping)):
             position = -1 if positions is None or positions[idx] is None else positions[idx]
 
@@ -727,7 +719,7 @@ class MultiTurn:
             conv = self.all_multi_turn[idx]
             image_path = self.get_image_paths(flatten=False)[idx]
             logger.info(f"before get alternative sequence for {idx}")
-            validity = self.get_alternative_sequence(alternative_mt_manager=alternative_mt_manager, idx=idx, #copy.deepcopy(conv),
+            validity = self.get_alternative_sequence(alternative_mt_manager=alternative_mt_manager, idx=idx,
                                                      alternative_action=alternative_action, answer=answer,
                                                      ground_truth= tokenized_ground_truth[idx] if tokenized_ground_truth is not None else None,
                                                      image_paths = copy.deepcopy(image_path),
@@ -745,8 +737,6 @@ class MultiTurn:
                 new_bbox = validity["new_bbox"] if validity is not None and "new_bbox" in validity.keys() else None
             new_bboxes.append(new_bbox)
             logger.info(f"after get alternative sequence for {idx}. Validity: {validity.all_multi_turn if isinstance(validity, MultiTurn) else validity}")
-            # sometimes, validity is MultiTurn. but we don't need this anyway rn
-            # selected_tool_turn = validity["image_turns"][-1] if validity is not None else None
 
             if alternative_action == "alternative_tool_call":
                 if validity is not None:
@@ -860,14 +850,9 @@ class MultiTurn:
         if alternative_action != "alternative_tool_call":
             # only keep (system, user, model)
             new_conv = new_conv[:min(tool_turn + 1, len(new_conv))]
-        # get rid of tool call and the "." before (if applicable)
-        # cutoff_idx = max(tool_start_idx - 1, 0)
-
-        #original_tool_call = conv[2].token_ids[tool_start_idx:]
 
         # get rid of tool call
         cutoff_idx = max(tool_start_idx, 0)
-        #original_tool_position = len(conv[2].token_ids) - len(conv[2].token_ids[:cutoff_idx])
         new_conv[tool_turn].token_ids = conv[tool_turn].token_ids[:cutoff_idx]
         logger.info(f"new_conv[{tool_turn}].token_ids after cutoff: {new_conv[tool_turn].token_ids}")
 

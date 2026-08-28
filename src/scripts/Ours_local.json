@@ -1,11 +1,11 @@
 {
   "train_params": {
-    "output_dir_prefix": "/path/to/output",
-    "model_name_or_path": "/path/to/output/Ours_timestamp/checkpoint-382/",
-    "deepspeed": "/path/to/src/scripts/zero3.json",
-    "dataset_name": "visual_probe_train:deepeyes_train_4k",
-    "data_file_paths": "/path/to/datasets/mini_o3/visual_probe_train/train.jsonl:/path/to/datasets/mini_o3/deepeyes_train_4k/train.jsonl",
-    "image_folders": "/path/to/datasets/mini_o3/visual_probe_train:/path/to/datasets/mini_o3/deepeyes_train_4k",
+    "output_dir_prefix": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/paper_export/focusreason_remote_dev_backup/runs",
+    "model_name_or_path": "Qwen/Qwen2.5-VL-7B-Instruct",
+    "deepspeed": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/paper_export/focusreason_remote_dev_backup/src/scripts/zero3.json",
+    "dataset_name": "pixel_reasoner",
+    "data_file_paths": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/paper_export/focusreason_remote_dev_backup/datasets/test.jsonl",
+    "image_folders": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/paper_export/focusreason_remote_dev_backup/datasets/images",
     "max_completion_length": 1024,
     "ds3_gather_for_generation": true,
     "use_vllm": true,
@@ -27,14 +27,30 @@
     "temperature": 1.0,
     "multi_turn": "tool",
     "reward_funcs": [
-      "accuracy"
+      "accuracy",
+      "mutual_information"
     ],
     "reward_func_weights": [
-      1.0
+      1.0,
+      0.1
     ],
     "reward_func_conditionals": [
-      false
+      false,
+      true
     ],
+    "mi_alternative_action": "alternative_tool_call",
+    "mi_use_advantages_directly": false,
+    "mi_contrasted_score": "log_probs",
+    "mi_use_info_nce": true,
+    "iou_target_zero": 0.3,
+    "iou_target_one": 1.0,
+    "iou_target_increase": "linear",
+    "iou_target_max_value": 0.175,
+    "mutual_information_clip_value": 1.5,
+    "mi_tanh": true,
+    "mutual_information_length_factor": 1.0,
+    "mi_masked_vision_forward_model": "self",
+    "mi_full_forward_model": "self",
     "chat_template": "/path/to/src/qwen_chat_template_tool.json",
     "per_device_eval_batch_size": 4,
     "learning_rate": 1e-6,

@@ -545,7 +545,7 @@ class Evaluator:
         json.dump(self.metrics, open(os.path.join(self.save_path, "full_results.json"), "w"))
 
     def preprocess_dataset(self, dataset, prompt_type, tools):
-        if dataset["dataset_name"] in ["pixel_reasoner", 'pixel_reasoner_vstar', 'pixel_reasoner_infovqa',
+        if dataset["dataset_name"] in ["pixel_reasoner", 'pixel_reasoner_vstar',
                                        "hr_bench_4k", "hr_bench_8k"] or dataset["dataset_name"].startswith("muffin_chihuahua") or dataset["dataset_name"].startswith("mme"):
             #logger.info(f"prompt type: {prompt_type}")
             #logger.info(f"tool name: {tool_name}")
@@ -572,8 +572,8 @@ class Evaluator:
             return preprocessed_dataset
 
         else:
-            raise NotImplementedError(f"the requested dataset {dataset} is not implemented. Choose from 'pr_train_dataset',"
-                                      f" 'pixel_reasoner_vstar', 'pixel_reasoner_infovqa'.")
+            raise NotImplementedError(f"the requested dataset {dataset} is not implemented. Choose from 'pixel_reasoner',"
+                                      f" 'pixel_reasoner_vstar', 'hr_bench_4k', 'hr_bench_8k', 'mme*' or 'muffin_chihuahua*'.")
 
     def _generate_and_score_completions(self, inputs: list[dict[str, str]], tools:list[Tool]):
         # only used in image and text rethink

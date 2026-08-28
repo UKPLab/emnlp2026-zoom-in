@@ -347,8 +347,6 @@ class Tool:
         self.tool_dict = copy.deepcopy(TOOL_TEMPLATES[template_name]["json"])
         for path_to_key, value in self.json_customization.items():
             keys = path_to_key.split(",")
-            #print(f"in Tool: keys: {keys}")
-            #print(f"in Tool: {cls.tool_dict}")
 
             last_container = reduce(operator.getitem, keys[:-1], self.tool_dict)
             last_container[keys[-1]] = value
@@ -374,11 +372,6 @@ class Tool:
             raise ValueError(f"target_image position out of bounds: {tool_args['target_image']}. It should be between 1 and {len(tool_params['image_paths'])}.")
 
         actual_tool_args["image_path"] = tool_params['image_paths'][int(tool_args['target_image']) - 1]
-
-        #else:
-        #    raise ValueError(f"Invalid tool name: {tool_name}")
-
-        # output_description += format_reminder
 
         original_tool_hparams = self.callable_function.keywords
 

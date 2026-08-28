@@ -1,6 +1,7 @@
 import math
 import os
 import json
+import hashlib
 import shutil
 import uuid
 from tqdm import tqdm
@@ -81,6 +82,19 @@ def read_jsonl(path):
     with open(path, 'r', encoding='utf-8') as f:
         return list(map(json.loads, f.readlines()))
 
+def _load_grid_font(cell_size):
+    """Load a TrueType font for the cell index labels, falling back to PIL's
+    built-in bitmap font if none of the candidate fonts are available."""
+    font_paths = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "arial.ttf"]
+    for font_path in font_paths:
+        try:
+            return ImageFont.truetype(font_path, size=cell_size // 8)
+        except Exception:
+            continue
+    print("Warning: no TrueType font found, falling back to PIL default font.")
+    return ImageFont.load_default()
+
+
 def generate_grid_from_jsonl(
         jsonl_path,
         image_source_dir,
@@ -89,10 +103,17 @@ def generate_grid_from_jsonl(
         grid_size=4,
         num_samples_class_0=4,
         num_output_images=5,
-        class_0_name="Muffin"  # Adjust this to match your JSONL class name
+        class_0_name="Muffin",  # Adjust this to match your JSONL class name
+        seed=42,
 ):
     """
     Reads from JSONL and loads images on-demand to create grid composites.
+
+    Reproducible and resumable: every output grid is seeded independently with
+    ``seed + img_idx``, so already-rendered grids can be skipped on a restart
+    without desynchronising the RNG for the remaining ones. ``test.jsonl`` is
+    written atomically at the very end and therefore doubles as the
+    "config complete" marker used by :func:`make_grid_data`.
     """
     # 1. Index the dataset by class without loading images
     class_map = {0: [], 1: []}
@@ -107,6 +128,11 @@ def generate_grid_from_jsonl(
     if not class_map[0] or not class_map[1]:
         raise ValueError("Could not find both classes in JSONL. Check class_0_name.")
 
+    # Sort the per-class file lists so that a fixed seed always maps to the same
+    # physical image regardless of the order the JSONL happened to be built in.
+    class_map[0].sort()
+    class_map[1].sort()
+
     # Setup output directories
     images_out_dir = os.path.join(output_path, "images")
     os.makedirs(images_out_dir, exist_ok=True)
@@ -114,42 +140,45 @@ def generate_grid_from_jsonl(
     total_cells = grid_size * grid_size
     cell_size = big_image_size // grid_size
 
-    font_paths = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "arial.ttf"]
-    font = ImageFont.load_default()
-    for font_path in font_paths:
-        # Try to load a larger font; fallback to default if not found
-        try:
-            # Standard Windows path, might need adjustment for other OS
-            font = ImageFont.truetype(font_path, size=cell_size // 8)
-            break
-        except:
-            print(f"Warning: Could not load font {font_path}.")
-            continue
-
+    font = _load_grid_font(cell_size)
 
     all_metadata = []
 
     for img_idx in range(num_output_images):
-        #print(f"start with image {img_idx}")
-        big_img = Image.new('RGB', (big_image_size, big_image_size), color=(255, 255, 255))
-        draw = ImageDraw.Draw(big_img)
+        # Per-image seed -> each grid is independently reproducible, which makes
+        # the (multi-hour) generation safe to resume at any point.
+        random.seed(seed + img_idx)
+        np.random.seed((seed + img_idx) % (2 ** 32))
 
-        # Determine cell labels for this big image
+        # Determine cell labels for this big image first: this is cheap and is
+        # needed to (re)build the metadata even when the image already exists.
         cell_indices = list(range(total_cells))
         if total_cells == 1:
-            if img_idx < num_output_images//2:
+            if img_idx < num_output_images // 2:
                 class_0_cells = []
             else:
                 class_0_cells = [0]
         else:
             class_0_cells = random.sample(cell_indices, min(num_samples_class_0, total_cells))
 
-        image_labels_map = {}
+        image_labels_map = {i: (0 if i in class_0_cells else 1) for i in range(total_cells)}
+
+        out_name = f"grid_{img_idx}.png"
+        out_path = os.path.join(images_out_dir, out_name)
+        all_metadata.append({"image": out_name, "labels": image_labels_map})
+
+        # Resume: a completed grid from a previous run is kept as-is. Grids are
+        # written atomically below, so any existing file is guaranteed complete.
+        if os.path.exists(out_path):
+            continue
+
+        big_img = Image.new('RGB', (big_image_size, big_image_size), color=(255, 255, 255))
+        draw = ImageDraw.Draw(big_img)
 
         for i in range(total_cells):
             #print(f"start with cell {i}")
             row, col = divmod(i, grid_size)
-            current_label = 0 if i in class_0_cells else 1
+            current_label = image_labels_map[i]
 
             # Lazy Load: Only pick the filename and open the image now
             img_filename = random.choice(class_map[current_label])
@@ -174,20 +203,22 @@ def generate_grid_from_jsonl(
             draw.rectangle([bbox[0] - 4, bbox[1] - 2, bbox[2] + 4, bbox[3] + 2], fill="white")
             draw.text(text_pos, text_str, fill="black", font=font)
 
-            image_labels_map[i] = current_label
-
         # Draw Grid Lines
         for line in range(0, big_image_size + 1, cell_size):
             draw.line([(line, 0), (line, big_image_size)], fill="black", width=3)
             draw.line([(0, line), (big_image_size, line)], fill="black", width=3)
 
-        # Save
-        out_name = f"grid_{img_idx}.png"
-        big_img.save(os.path.join(images_out_dir, out_name))
-        all_metadata.append({"image": out_name, "labels": image_labels_map})
+        # Atomic save: write to a temp file then rename, so an interrupted run
+        # never leaves a truncated PNG that a resume would mistake for complete.
+        tmp_path = out_path + ".tmp"
+        big_img.save(tmp_path, format="PNG")  # explicit: temp name has no .png ext
+        os.replace(tmp_path, out_path)
 
-    with open(os.path.join(output_path, "test.jsonl"), "w") as f:
+    # Atomic write of the metadata; its presence marks the config as complete.
+    tmp_meta = os.path.join(output_path, "test.jsonl.tmp")
+    with open(tmp_meta, "w") as f:
         json.dump(all_metadata, f, indent=4)
+    os.replace(tmp_meta, os.path.join(output_path, "test.jsonl"))
 
 
 def initial_preprocess(download_dir:str):
@@ -205,7 +236,9 @@ def initial_preprocess(download_dir:str):
 
         print(cls)
         cls_path = os.path.join(download_dir, cls.lower())
-        for img_path in os.listdir(cls_path):
+        # sorted() so the img{idx}.jpg naming is deterministic across machines
+        # (os.listdir order is filesystem-dependent).
+        for img_path in sorted(os.listdir(cls_path)):
             full_image_path = os.path.join(cls_path, img_path)
             print(img_path)
             #image_name = uuid.uuid4().hex + ".jpg"
@@ -219,24 +252,34 @@ def initial_preprocess(download_dir:str):
 def make_grid_data(configs:list, download_dir: str, save_path_prefix: str, total_images: int, base_seed:int = 42):
     for config in tqdm(configs):
         seed = get_seed(base_seed, config)
-        random.seed(seed)
-        np.random.seed(seed)
-        print(f"generating data for {config}")
         output_path = os.path.join(save_path_prefix, f"grid_pixels_{config['big_image_size']}_gridsize_{config['grid_size']}_samples_class_0_{config['num_samples_class_0']}")
-        if os.path.exists(output_path):
-            print(f"Skipping {output_path}")
+        # test.jsonl is written (atomically) only once a config is fully done, so
+        # its presence is the completion marker. A merely-existing output_path is
+        # NOT enough: it may hold a partially generated config from a killed run.
+        if os.path.exists(os.path.join(output_path, "test.jsonl")):
+            print(f"Skipping completed {output_path}")
             continue
         os.makedirs(output_path, exist_ok=True)
+        print(f"generating data for {config}")
         generate_grid_from_jsonl(
             jsonl_path=os.path.join(download_dir, "test.jsonl"),
             image_source_dir=os.path.join(download_dir, "images"),
-            output_path=os.path.join(save_path_prefix, output_path),
+            output_path=output_path,
             big_image_size=config['big_image_size'],
             grid_size=config['grid_size'],
             num_samples_class_0=config['num_samples_class_0'],
             num_output_images=total_images,
-            class_0_name="Muffin"  # Adjust this to match your JSONL class name
+            class_0_name="Muffin",  # Adjust this to match your JSONL class name
+            seed=seed,
         )
+
+# Prepended to every M&C question so the emitted JSONL is already in the
+# canonical format (problem/solution) consumed by open_r1.preprocess_data,
+# i.e. the paper's own dataset needs no separate converter step.
+GRID_PREAMBLE = ("In the image you see a grid, whose cells are numbered from left to "
+                 "right and top to bottom. In each cell, the cell's index is printed "
+                 "in the upper left corner. ")
+
 
 def make_vqa_dataset(configs: list, save_path_prefix: str, variant:str, total_images: int, base_seed:int=42):
     if variant == "both":
@@ -301,8 +344,8 @@ def make_vqa_dataset(configs: list, save_path_prefix: str, variant:str, total_im
                     query = (f"Which object is in cell number {chosen_label}?\n(A) {option_A}"
                                                         f"\n(B) {option_B}"
                                                f"\nAnswer with the option's letter from the given choices directly.")
-                    entry["question"] = query
-                    entry["answer"] = correct_tag
+                    entry["problem"] = GRID_PREAMBLE + query
+                    entry["solution"] = correct_tag
                     entry["bbox"] = get_bbox(chosen_label, config['grid_size'], config['big_image_size'] // config['grid_size'])
             elif variant == "find_outlier":
                 if config["num_samples_class_0"] != 1:
@@ -324,8 +367,8 @@ def make_vqa_dataset(configs: list, save_path_prefix: str, variant:str, total_im
                     query = (f"In all cells except one you see a Chihuahua. Which cell does not contain a Chihuahua, but a Muffin?"
                              f"\nAnswer only with the cell number.")
 
-                    entry["question"] = query
-                    entry["answer"] = outliers[0]
+                    entry["problem"] = GRID_PREAMBLE + query
+                    entry["solution"] = outliers[0]
                     entry["bbox"] = get_bbox(outliers[0], config['grid_size'], config['big_image_size'] // config['grid_size'])
             else:
                 raise ValueError(f"variant {variant} not supported")
@@ -345,8 +388,28 @@ def get_bbox(correct_label:int, cells_per_row:int, cell_size: int) -> list[int]:
 
 def get_seed(base_seed:int, config:dict, offset=1000000):
     config_str = f"{config['big_image_size']}_{config['grid_size']}_{config['num_samples_class_0']}"
-    config_seed = base_seed + hash(config_str) % offset
+    # NOTE: the built-in hash() is salted per-process (PYTHONHASHSEED) and would
+    # give a different seed on every run/machine, silently breaking --base_seed.
+    # Use a stable cryptographic hash so seeds are fully reproducible everywhere.
+    config_hash = int(hashlib.sha256(config_str.encode("utf-8")).hexdigest(), 16)
+    config_seed = base_seed + config_hash % offset
     return config_seed
+
+# If the primary host is unreachable, images are fetched from this Wayback
+# Machine snapshot instead (prepend it to the original URL).
+WAYBACK_PREFIX = "https://web.archive.org/web/20240417234016im_/"
+
+
+def _curl_to_file(url: str, output_path, follow_redirects: bool = False) -> None:
+    """Download a single URL to ``output_path`` with curl, raising on failure."""
+    redirect_flags = ['-L'] if follow_redirects else ['--max-redirs', '0']
+    subprocess.run(
+        ['curl', '-f', *redirect_flags, '-o', str(output_path), url],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
 
 def download_images(images: list[dict], directory: str = ".") -> None:
     target_dir = Path(directory)
@@ -360,19 +423,34 @@ def download_images(images: list[dict], directory: str = ".") -> None:
         filename = Path(urlparse(url).path).name or "image.png"
         output_path = target_dir_for_class / filename
 
-        # Use curl since you mentioned it works
-        try:
-            result = subprocess.run(
-                ['curl', '-f', '--max-redirs', '0', '-o', str(output_path), url],
-                check=True,
-                capture_output=True,
-                text=True
+        # Resume: skip files already fetched by a previous run.
+        if output_path.exists() and output_path.stat().st_size > 0:
+            print(f"↺ Skipping existing: {output_path}")
+            continue
+
+        # Try the primary source first, then the Wayback Machine backup mirror.
+        # (Wayback may redirect to the nearest snapshot, so allow redirects there.)
+        tmp_path = output_path.with_name(output_path.name + ".tmp")
+        sources = [(url, False), (WAYBACK_PREFIX + url, True)]
+        for src_url, follow_redirects in sources:
+            try:
+                _curl_to_file(src_url, tmp_path, follow_redirects=follow_redirects)
+                # Atomic: the final file only appears once fully downloaded.
+                os.replace(tmp_path, output_path)
+                print(f"✓ Downloaded: {src_url} -> {output_path}")
+                break
+            except subprocess.CalledProcessError as e:
+                print(f"✗ Failed to download {src_url}: {e}")
+                if e.stderr:
+                    print(f"  stderr: {e.stderr}")
+        else:
+            # Neither source worked -> clean up any partial temp file and abort.
+            if tmp_path.exists():
+                tmp_path.unlink()
+            raise RuntimeError(
+                f"Could not download {url} from the primary source or the "
+                f"Wayback Machine backup ({WAYBACK_PREFIX + url})."
             )
-            print(f"✓ Downloaded: {url} -> {output_path}")
-        except subprocess.CalledProcessError as e:
-            print(f"✗ Failed to download {url}: {e}")
-            print(f"  stderr: {e.stderr}")
-            raise
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate synthetic grid data for M&C dataset')
@@ -395,8 +473,10 @@ if __name__ == "__main__":
             cls = "muffin"
         else:
             cls = "chihuahua"
-        image_list.append({"source": os.path.join(image_base_url, f"test{i}.png"),
-                           "target": os.path.join(download_dir, cls)})
+        # Build the URL with a plain f-string (os.path.join would insert
+        # backslashes on Windows); target is the per-class subfolder name.
+        image_list.append({"source": f"{image_base_url}test{i}.png",
+                           "target": cls})
 
     download_images(image_list, download_dir)
 

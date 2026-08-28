@@ -1,7 +1,6 @@
 from qwen_vl_utils import smart_resize
 
-import functools
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 import random
 from dataclasses import dataclass
 
@@ -643,8 +642,6 @@ def generate_bbox_2d_new_close_iou_targeted(
                     "cand_final_norm_simulated": cand_sim_final,
                 }
 
-
-        #print(other_bboxes_boxI)
         too_close_to_previous = False
         if err <= tol:
             if other_bboxes is not None and len(other_bboxes) > 0:

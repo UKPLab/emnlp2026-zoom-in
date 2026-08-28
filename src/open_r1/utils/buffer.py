@@ -5,7 +5,6 @@ import torch.distributed as dist
 import numpy as np
 from .logger import get_logger
 from functools import partial
-from accelerate.utils import is_peft_model, set_seed, gather_object, broadcast_object_list
 from open_r1.utils.debug_utils import serialized_size_mb
 
 # Get logger for this module
@@ -273,14 +272,12 @@ class Buffer:
                 raise ValueError("begin must be smaller than end. This points towards the fact that the local buffer size is not a multiple of the batch sizes used to fill it. ")
 
         logger.info(f"syncing buffers: begin: '{begin}', end: '{end}'")
-        #global_buffer = _gpu_gather_object(self.data[begin:end])
         logger.info(f"replay buffer syncs {serialized_size_mb(self.data[begin:end])} MB of data")
         # Gather Python objects via Gloo (CPU) to avoid NCCL/GPU staging and OOM.
         output_objects = [None for _ in range(dist.get_world_size())]
         self.ensure_process_group()
         dist.all_gather_object(output_objects, self.data[begin:end], group=self.sync_process_group)
         global_buffer = [x for y in output_objects for x in y]
-        #global_buffer = gather_object(self.data[begin:end])
 
         logger.info(f"global buffer: {len(global_buffer)}")
         logger.info(f"global buffer first entry: {global_buffer[0]}")
@@ -328,7 +325,6 @@ class Buffer:
 
     def _get_idxs(self, batch_size: int, sampling_source, deterministic=False) -> list[int]:
         if deterministic:
-            #logger.info(f"read pos: {self.read_position}")
             if self.read_position >= self.max_size:
                 self.read_position -= self.max_size
             idxs = np.arange(self.read_position, self.read_position + batch_size).tolist()
@@ -426,7 +422,7 @@ class Buffer:
                 values_list.append(getattr(batch, image_key))
 
             if values_list:
-                combined_batch[image_key] = torch.cat(values_list, dim=0)#.clone().contiguous()
+                combined_batch[image_key] = torch.cat(values_list, dim=0)
 
         return Sample(**combined_batch)
 
@@ -468,8 +464,6 @@ def remove_left_padding_seq(seq:torch.tensor, padding_value=0, padding_side="lef
     """Remove left padding from a tensor based on padding_value with zero-th dimension =1 (i.e. batch size = 1)"""
     if seq.numel() == 0:
         return seq
-
-    #logger.info(f"seq shape: {seq.shape}")
 
     seq = seq.squeeze(0)
 

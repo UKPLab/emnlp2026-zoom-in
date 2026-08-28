@@ -1,17 +1,3 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import os
 
 import json
@@ -276,20 +262,6 @@ class GRPOScriptArguments(ScriptArguments):
         }
     )
 
-    #mi_contrasted_area: Optional[str] = field(
-    #    default = None,
-    #    metadata={
-    #        "help": "which part of the sequence should be contrasted. choose from 'first_box_entry', 'first_box_entry_to_end"
-    #    }
-    #)
-
-    #mi_removed_area: Optional[str] = field(
-    #    default=None,
-    #    metadata={
-    #        "help": "which part of the sequence should be removed, so the contrast is not trivial. choose from 'tool_to_box'"
-    #    }
-    #)
-
     mi_contrasted_score: Optional[str] = field(
         default="log_probs",
         metadata={
@@ -345,13 +317,6 @@ class GRPOScriptArguments(ScriptArguments):
             "help": "type of overlap metric for the alternative tool call. 'iou' or 'recall'"
         }
     )
-
-    #mi_short_bridge: Optional[str] = field(
-    #    default=None,
-    #    metadata={
-    #        "help": "what to insert after the removed area and before the contrasted area. Choose from 'double_newline', 'double_newline,the,answer,is' or None"
-    #    }
-    #)
 
     iou_reward_aggregate: Optional[str] = field(
         default="last",
@@ -496,14 +461,6 @@ class GRPOScriptArguments(ScriptArguments):
 class GRPOModelConfig(ModelConfig):
     freeze_vision_modules: bool = False
 
-#SYSTEM_PROMPT = (
-#    "A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant "
-#    "first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning "
-#    "process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., "
-#    "<think> reasoning process here </think><answer> answer here </answer>"
-#)
-
-
 def get_vlm_module(model_name_or_path):
     if "qwen" in model_name_or_path.lower() or "pixelreasoner" in model_name_or_path.lower():
         return Qwen2VLModule
@@ -540,7 +497,6 @@ def main(script_args, training_args, model_args):
         info = det.get_cluster_info()
         container_addrs = info.container_addrs
         vllm_address = container_addrs[-1]
-        #start_vllm_if_rank0(list(range(script_args.vllm_devices)))
     else:
         raise ValueError(f"Unsupported mode: {script_args.training_mode}")
 
@@ -582,7 +538,6 @@ def main(script_args, training_args, model_args):
         "iou": {"func": partial(iou_reward, aggregate_over_conv=script_args.iou_reward_aggregate), "type": "per_completion", "name": "iou"}
     }
 
-    # todo: refactor this to allow for variable dataset size
     if script_args.iou_target_zero is None or script_args.iou_target_one is None or script_args.iou_target_increase is None:
         iou_target_fn = None
     else:
@@ -619,8 +574,6 @@ def main(script_args, training_args, model_args):
     else:
         tools = None
 
-    #prompt_type = script_args.prompt_type + "_tool" if script_args.multi_turn == "tool" else script_args.prompt_type
-    #question_prompt = vlm_module_cls.get_question_template(task_type=script_args.prompt_type)
     prompt_type = script_args.prompt_type if script_args.prompt_type is not None else tool_args[0]["prompt_type"]
     question_prompt = get_question_template(task_type=prompt_type)
     if tools is not None:
@@ -632,10 +585,6 @@ def main(script_args, training_args, model_args):
                 tool_name = "crop_image" if tool.name == "crop_image_normalized" else tool.name
                 question_prompt = question_prompt.replace(f"{{{replacement_string}}}", tool_name)
 
-
-    #reward_funcs = script_args.reward_funcs
-    #if script_args.prompt_type == "no_think":
-    #    reward_funcs.append("no_think")
     # Get reward functions
     reward_funcs = []
     for idx, func in enumerate(script_args.reward_funcs):
@@ -658,7 +607,6 @@ def main(script_args, training_args, model_args):
     data_files = script_args.data_file_paths.split(":")
     image_folders = script_args.image_folders.split(":")
 
-    # reward_method was ..._args.reward_method but it was never used anyway
     dataset = prepare_data(dataset_names, data_files, image_folders, question_prompt, None)
 
     # Split dataset for validation if requested
@@ -675,8 +623,6 @@ def main(script_args, training_args, model_args):
 
     # Select trainer class based on vlm_trainer argument
     if training_args.use_vllm:
-        #trainer_cls = Qwen2VLGRPOVLLMTrainer
-        #trainer_cls = VLMGRPOTrainerVLLM
         trainer_cls = UpdatedVLMGRPOTrainerVLLM
         logger.info("Using vllm only works with Qwen 2.5 or 2 as of now!")
     else:
@@ -771,20 +717,7 @@ def main(script_args, training_args, model_args):
             dummy_vllm_generation=script_args.dummy_vllm_generation,
         )
     else:
-        trainer = trainer_cls(
-            model=model_args.model_name_or_path,
-            reward_funcs=reward_funcs,
-            args=training_args,
-            vlm_module=vlm_module_cls(),
-            train_dataset=splits['train'].select(data_range) if data_range is not None else splits['train'],
-            eval_dataset=splits.get('validation') if training_args.eval_strategy != "no" else None,
-            peft_config=get_peft_config(model_args),
-            freeze_vision_modules=model_args.freeze_vision_modules,
-            attn_implementation=model_args.attn_implementation,
-            max_pixels=script_args.max_pixels,
-            min_pixels=script_args.min_pixels,
-            callbacks=aim_callback
-        )
+        raise NotImplementedError("only vllm generation works for now, set use_vllm to True")
 
     if script_args.aim_run_hash is None:
         trainer.train()

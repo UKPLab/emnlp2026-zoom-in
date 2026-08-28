@@ -280,7 +280,6 @@ def accuracy_reward(completions, solution, **kwargs):
 
 def format_reward(completions, **kwargs):
     """Reward function that checks if the completion has a specific format."""
-    # logger.info(f"in format_reward: completions: {completions}, kwargs: {kwargs}")
     pattern = r"<think>.*?</think>\s*<answer>.*?</answer>"
     completion_contents = [completion[0]["content"] for completion in completions]
     matches = [re.fullmatch(pattern, content, re.DOTALL) for content in completion_contents]
@@ -299,12 +298,9 @@ def format_reward(completions, **kwargs):
 
 def format_reward_only_answer(completions, **kwargs):
     """Reward function that checks if the completion has a specific format."""
-    # logger.info(f"in format_reward: completions: {completions}, kwargs: {kwargs}")
-    # TODO: is it necessary to check that there is only a single <answer></answer> tag and not multiple for intermediate turn results?
     pattern = r".*<answer>(.*?)</answer>\s{,2}$"
     completion_contents = [completion[0]["content"] for completion in completions]
     matches = [re.fullmatch(pattern, content, re.DOTALL) for content in completion_contents]
-    # logger.info(f"in format_reward: content: {completion_contents}, matches: {matches}")
     current_time = datetime.now().strftime("%d-%H-%M-%S-%f")
     if os.getenv("DEBUG_MODE") == "true":
         log_path = os.getenv("LOG_PATH")
