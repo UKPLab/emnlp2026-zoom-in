@@ -51,7 +51,7 @@
     "mutual_information_length_factor": 1.0,
     "mi_masked_vision_forward_model": "self",
     "mi_full_forward_model": "self",
-    "chat_template": "/path/to/src/qwen_chat_template_tool.json",
+    "chat_template": "/pfss/mlde/workspaces/mlde_wsp_UKP_Multimodal/helm/focusreason/paper_export/focusreason_remote_dev_backup/src/qwen_chat_template_tool.json",
     "per_device_eval_batch_size": 4,
     "learning_rate": 1e-6,
     "lr_scheduler_type": "constant_with_warmup",

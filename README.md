@@ -1,4 +1,13 @@
-# Code for EMNLP 2026 paper "Learning to Zoom Efficiently with a Contrastive Curriculum"
+<p  align="center">
+  <img src='Figure_1.png' width='1000'>
+</p>
+
+# Learning to Zoom Efficiently with a Contrastive Curriculum
+
+## Overview
+
+This repository provides the code for our paper "Learning to Zoom Efficiently with a Contrastive Curriculum", accepted to EMNLP 2026.
+It contains code to recreate our proposed M&C dataset and run training and evaluation to reproduce our results.
 
 ## Setup
 First, do ``pip install --no-deps -r requirements.txt`` in python 3.12.
@@ -12,8 +21,8 @@ For construction of the M&C dataset, do
 generate_synthetic_grid_data.py --download_dir=/image/download/path --save_path_prefix=/save/path/generated/splits
 `
 
-which downloads the source images into download_dir, preprocesses them, generates image grids and finally generates textual questions for the 
-M&C VQA dataset which are saved under save_path_prefix. The image grid generation takes several hours but can be resumed.
+which downloads the source images into `download_dir`, preprocesses them, generates image grids and finally generates textual questions for the 
+M&C VQA dataset which are saved under `save_path_prefix`. The image grid generation takes several hours but can be resumed.
 
 ## Data format
 
@@ -95,3 +104,21 @@ in its `get_models_input` method.
 
 For model analysis, specify the dataset paths in `initiate_analysis.py` and enable evaluation
 in its `get_models_input` method. 
+
+## Contact
+Responsible person: Falko Helm, mail: falko.helm@tu-darmstadt.de, github: falko1
+
+Affiliations: 
+- UKP Lab: https://www.informatik.tu-darmstadt.de/ukp/ukp_home/index.en.jsp
+- TU Darmstadt: https://www.tu-darmstadt.de/
+- Hessian AI: https://www.hessian.ai/
+- JAIF: https://www.fz-juelich.de/en/jsc/jupiter/jaif-jupiter-ai-factory
+
+If you find this repo helpful, please consider citing us:
+
+Helm, Falko and Gurevych, Iryna: Learning to Zoom Efficiently with a Contrastive Curriculum. To appear in Empirical Methods of Natural Language Processing (EMNLP) 2026
+
+
+
+## Disclaimer
+This repository contains experimental software and is published for the sole purpose of giving additional background details on the respective publication. 

@@ -5,7 +5,6 @@ import torch.distributed as dist
 import numpy as np
 from .logger import get_logger
 from functools import partial
-from open_r1.utils.debug_utils import serialized_size_mb
 
 # Get logger for this module
 logger = get_logger(__name__)
@@ -272,7 +271,6 @@ class Buffer:
                 raise ValueError("begin must be smaller than end. This points towards the fact that the local buffer size is not a multiple of the batch sizes used to fill it. ")
 
         logger.info(f"syncing buffers: begin: '{begin}', end: '{end}'")
-        logger.info(f"replay buffer syncs {serialized_size_mb(self.data[begin:end])} MB of data")
         # Gather Python objects via Gloo (CPU) to avoid NCCL/GPU staging and OOM.
         output_objects = [None for _ in range(dist.get_world_size())]
         self.ensure_process_group()
