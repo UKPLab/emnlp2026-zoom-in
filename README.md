@@ -1,7 +1,7 @@
 # Code for EMNLP 2026 paper "Learning to Zoom Efficiently with a Contrastive Curriculum"
 
 ## Setup
-First, do ``pip install -r requirements.txt`` in python 3.12.
+First, do ``pip install --no-deps -r requirements.txt`` in python 3.12.
 
 ## Dataset construction
 Note: Due to copyright issues we can not distribute the dataset directly. You need to rebuild it.
@@ -46,6 +46,27 @@ Supported `--dataset` values: `hr_bench_4k`, `hr_bench_8k`, `mme`, `mme_lite`,
 PixelReasoner's packaging (original: `craigwu/vstar_bench`). Dataset layouts vary between releases,
 so verify the produced `test.jsonl` before a full run — a partial download (`--max_shards 1`) is
 enough to check the format.
+
+## Training environment: CUDA toolkit & DeepSpeed
+
+DeepSpeed (ZeRO-3 + CPU-Adam) JIT-compiles CUDA ops at training start, so the env needs an `nvcc`
+matching your PyTorch CUDA build (12.4, pinned in `requirements.txt`) plus a compiler. conda is the
+easiest rootless way; system CUDA / `module load` / a CUDA-devel image work too:
+```
+conda install -c conda-forge gxx_linux-64=14.3.0
+conda install --override-channels -c nvidia/label/cuda-12.4.1 cuda-toolkit=12.4.1 cuda-nvcc cuda-cudart-dev
+nvcc --version   # must report 12.4, not 13.x
+```
+`--override-channels` and the pinned version are required — otherwise conda pulls CUDA 13.x from
+`defaults` and `nvcc` won't match. Then export these (persist via `conda env config vars set`, since
+`train_scheduler.py` starts `trl vllm-serve` before any Python runs):
+```
+export CUDA_HOME=$CONDA_PREFIX
+export LIBRARY_PATH=$CONDA_PREFIX/lib:$LIBRARY_PATH
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+export TORCH_EXTENSIONS_DIR=$CONDA_PREFIX/deepspeed_torch_extensions
+```
+Verify with `python -c 'import deepspeed; deepspeed.ops.op_builder.CPUAdamBuilder().load()'`.
 
 ## Training
 **Requirements:** the scheduler uses GNU `screen` (install with `sudo apt install screen`, or
