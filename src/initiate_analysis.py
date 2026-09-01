@@ -14,50 +14,52 @@ from open_r1.analysis.make_results_table import get_results, compute_new_metric
 
 logger = setup_project_logging(log_file=None)
 
-def unpack_datasets(list_of_datasets: list[Union[str, dict]]) -> tuple[list[str], list[str]]:
+def unpack_datasets(list_of_datasets: list[dict]) -> tuple[list[str], list[str], list[str]]:
+    """Expand the config's ``dataset_name`` entries into aligned (name, short_name,
+    path) lists. Every entry is a dict ``{"name", "path", ...}``; ``muffin_chihuahua``
+    expands over its grid configs (all sharing the same path), every other dataset
+    maps to a single entry. The three returned lists are aligned element-wise."""
     unpacked_list = []
     short_names = []
     paths = []
 
     short_name_map = {
+        "pixel_reasoner": "pr",
         "pixel_reasoner_vstar": "V*",
-        "pixel_reasoner_infovqa": "infovqa",
         "hr_bench_4k": "hrb_4k",
         "hr_bench_8k": "hrb_8k",
         "mme_lite": "mme_lite",
         "mme": "mme"
     }
-    print(f"in unpack datasets: list_of_datasets={list_of_datasets}")
     for dataset in list_of_datasets:
-        if isinstance(dataset, str):
-            unpacked_list.append(dataset)
-            if dataset in short_name_map:
-                short_names.append(short_name_map[dataset])
-            else:
-                short_names.append(dataset)
-        elif isinstance(dataset, dict):
-            if dataset["name"] == "muffin_chihuahua":
-                for gridsize in dataset["gridsize"]:
-                    for grid_pixels in dataset["grid_pixels"]:
-                        for mode in dataset["mode"]:
-                            if gridsize == 1 and mode == "find_outlier":
-                                continue
-                            dataset_as_string = f"muffin_chihuahua_grid_pixels_{grid_pixels*1024}_gridsize_{gridsize}_samples_class_0_"
+        if not isinstance(dataset, dict):
+            raise ValueError(
+                f"Each dataset must be a dict with 'name' and 'path', but got {dataset!r}")
+        if "name" not in dataset or "path" not in dataset:
+            raise ValueError(f"dataset entry {dataset!r} needs both 'name' and 'path'")
+        name, path = dataset["name"], dataset["path"]
 
-                            if mode == "single_cell_query":
-                                dataset_as_string += f"{max(1, int(gridsize**2 / 2))}"
-                            elif mode == "find_outlier":
-                                dataset_as_string += f"{1}"
-                            else:
-                                raise ValueError(f"Unknown mode {mode}")
-                            unpacked_list.append(dataset_as_string)
-                            short_names.append(f"{grid_pixels}k_{gridsize}_{'scq' if mode == 'single_cell_query' else 'fo'}")
-                paths.append(dataset["path"])
-            else:
-                raise ValueError(f"Unknown dataset for unpacking {dataset}")
+        if name == "muffin_chihuahua":
+            for gridsize in dataset["gridsize"]:
+                for grid_pixels in dataset["grid_pixels"]:
+                    for mode in dataset["mode"]:
+                        if gridsize == 1 and mode == "find_outlier":
+                            continue
+                        dataset_as_string = f"muffin_chihuahua_grid_pixels_{grid_pixels*1024}_gridsize_{gridsize}_samples_class_0_"
+
+                        if mode == "single_cell_query":
+                            dataset_as_string += f"{max(1, int(gridsize**2 / 2))}"
+                        elif mode == "find_outlier":
+                            dataset_as_string += f"{1}"
+                        else:
+                            raise ValueError(f"Unknown mode {mode}")
+                        unpacked_list.append(dataset_as_string)
+                        short_names.append(f"{grid_pixels}k_{gridsize}_{'scq' if mode == 'single_cell_query' else 'fo'}")
+                        paths.append(path)
         else:
-            raise ValueError(f"Datasets have to be either strings or dicts but got {dataset}")
-    print(f"unpack datasets to return: unpacked_list={unpacked_list}, short_names={short_names}")
+            unpacked_list.append(name)
+            short_names.append(short_name_map.get(name, name))
+            paths.append(path)
     return unpacked_list, short_names, paths
 
 class ModelParams:
@@ -78,6 +80,7 @@ class ModelParams:
 class DatasetParams:
     def __init__(self, dataset_name, dataset_path, **kwargs):
         self.dataset_name = dataset_name
+        self.default_num_generations = 4
 
         if self.dataset_name.startswith("muffin_chihuahua"):
             if self.dataset_name.endswith("class_0_1") and "gridsize_1_" not in self.dataset_name:
@@ -85,11 +88,14 @@ class DatasetParams:
             else:
                 task = "single_cell_query"
 
-            self.data_files = os.path.join(dataset_path, f"{dataset_name.removeprefix('muffin_chihuahua_')}/{task}.jsonl")
-            self.image_folders = os.path.join(dataset_path, f"{dataset_name.removeprefix('muffin_chihuahua_')}/images")
-            self.default_num_generations = 4
+            subdir = dataset_name.removeprefix("muffin_chihuahua_")
+            self.data_files = os.path.join(dataset_path, subdir, f"{task}.jsonl")
+            self.image_folders = os.path.join(dataset_path, subdir, "images")
         else:
-            raise NotImplementedError(f"dataset {dataset_name} not implemented!")
+            # Every other dataset follows the download_data.py output convention:
+            # <path>/test.jsonl, with image paths written relative to <path>.
+            self.data_files = os.path.join(dataset_path, "test.jsonl")
+            self.image_folders = dataset_path
 
 class EvalParams:
     def __init__(self, batch_size=200, tensor_parallel_size=1, enforce_eager=True, no_vllm=False, dry_run=False,
@@ -267,25 +273,27 @@ class Evals:
     def split_input(self) -> list[SingleEval]:
         result = []
         for entry in self.input:
+            # Unpack datasets first so name and path stay aligned, then treat each
+            # (dataset_name, dataset_path) pair as a single axis -- otherwise the
+            # cartesian product below would mismatch names with paths.
+            raw_datasets = entry.pop("dataset_name")
+            if isinstance(raw_datasets, dict):
+                raw_datasets = [raw_datasets]
+            names, _, paths = unpack_datasets(raw_datasets)
+            dataset_pairs = list(zip(names, paths))
+
+            # Wrap every remaining scalar into a 1-element list.
             for key, value in entry.items():
-                if isinstance(value, list):
-                    entry[key] = value
-                else:
+                if not isinstance(value, list):
                     entry[key] = [value]
 
-            entry["dataset_name"], _, entry["dataset_path"] = unpack_datasets(entry["dataset_name"])
+            param_names = list(entry.keys()) + ["__dataset__"]
+            param_values = list(entry.values()) + [dataset_pairs]
 
-            # Get all parameter names and their corresponding value lists
-            param_names = list(entry.keys())
-            param_values = list(entry.values())
-
-            # Generate all combinations using Cartesian product
-            combinations = itertools.product(*param_values)
-
-            # Create objects for each combination
-            for combo in combinations:
-                # Create kwargs dict from parameter names and current combination
+            # Create objects for each combination of the cartesian product.
+            for combo in itertools.product(*param_values):
                 kwargs = dict(zip(param_names, combo))
+                kwargs["dataset_name"], kwargs["dataset_path"] = kwargs.pop("__dataset__")
                 instances = tuple(cls(**kwargs) for cls in self.classes.values())
                 single_eval = SingleEval(**dict(zip(self.classes.keys(), instances)))
                 result.append(single_eval)
@@ -370,129 +378,6 @@ class Evals:
 
         return df
 
-def get_models_input():
-    models_input = [
-        {
-            "short_name": "3B_no_train",
-            "model_path": "Qwen/Qwen2.5-VL-3B-Instruct",
-            "checkpoint": None,
-            "model_class": "Qwen/Qwen2.5-VL-3B-Instruct",
-            "output_path": "Qwen_2p5_3B_no_train",
-            "tool_config_type": ["zoom_in_absolute", "no_tool"],
-            "max_pixels": [5000 * 28 * 28],
-            "min_pixels": [500 * 28 * 28],
-            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
-            'bbox_type': [None],
-            'strict_tool_extraction': [False],
-            'max_tokens_per_reply': [1024],
-            "evaluate": False,
-            "analyze": False
-        },
-        {
-            "short_name": "7B_no_train",
-            "model_path": "Qwen/Qwen2.5-VL-7B-Instruct",
-            "checkpoint": None,
-            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
-            "output_path": "Qwen_2p5_7B_no_train",
-            "tool_config_type": ["no_tool", "zoom_in_absolute"],  # , "zoom_in_absolute"], #,"zoom_in_absolute",
-            "max_pixels": [5000 * 28 * 28],
-            "min_pixels": [500 * 28 * 28],
-            "dataset_name": ["pixel_reasoner_vstar", "pixel_reasoner_infovqa",
-                             {"name": "muffin_chihuahua",
-                              "grid_pixels": [1, 2, 4, 8],
-                              "gridsize": [1, 2, 4, 8, 16],
-                              "mode": ["single_cell_query", "find_outlier"]},
-                             "hr_bench_4k", "hr_bench_8k",
-                             #"mme_lite",
-                             "mme"
-                             ],
-            # ["hr_bench_4k", "hr_bench_8k", "mme_lite", "mme"], #["pixel_reasoner_vstar", "pixel_reasoner_infovqa"],
-            'bbox_type': [None],
-            'strict_tool_extraction': [False],
-            'tool_padding': [0.1],
-            'max_tokens_per_reply': [1024],
-            #'temperature': [1.0],
-            #'num_generations': ["dataset_dependent"],
-            "evaluate": False,
-            "analyze": False,
-            "paper": True
-        },
-        {
-            "short_name": "PixelReasoner_original_after_SFT",
-            "model_path": "TIGER-Lab/PixelReasoner-WarmStart",
-            "checkpoint": None,
-            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
-            "output_path": "PixelReasoner_original_after_SFT",
-            "tool_config_type": ["PR_crop_image_normalized,select_frames", "no_tool"],  # ,
-            "max_pixels": [5120 * 28 * 28],
-            "min_pixels": [512 * 28 * 28],
-            "dataset_name": ["hr_bench_4k", "hr_bench_8k", "mme_lite", "mme"],
-            'bbox_type': [None],
-            'strict_tool_extraction': [False],
-            'max_tokens_per_reply': [1024],
-            "evaluate": False,
-            "analyze": False
-        },
-        {
-            "short_name": "PixelReasoner_original_after_RL",
-            "model_path": "TIGER-Lab/PixelReasoner-RL-v1",
-            "checkpoint": None,
-            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
-            "output_path": "PixelReasoner_original_after_RL",
-            "tool_config_type": ["no_tool", "PR_crop_image_normalized,select_frames"],  # ],#, "no_tool"],#, ],
-            "dataset_name": [
-                {"name": "muffin_chihuahua",
-                 "grid_pixels": [1, 2, 4, 8],
-                 "gridsize": [
-                     1,
-                     2, 4, 8, 16],
-                 "mode": ["single_cell_query", "find_outlier"]
-                 },
-                "hr_bench_4k", "hr_bench_8k", "mme",  #"mme_lite"
-                "pixel_reasoner_infovqa"
-            ],
-            # ["hr_bench_4k", "hr_bench_8k", "mme_lite", "mme"], #"pixel_reasoner_vstar"],#["pixel_reasoner_vstar", ],#, "pixel_reasoner_infovqa"],
-            'bbox_type': [None],
-            'strict_tool_extraction': [False],
-            'max_tokens_per_reply': [1024],
-            #'temperature': [1.0],
-            #'num_generations': ["dataset_dependent"],
-            "max_pixels": [5120 * 28 * 28],
-            "min_pixels": [512 * 28 * 28],
-            "evaluate": False,
-            "analyze": False,
-            "paper": True
-        },
-
-        {
-            "short_name": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const",
-            "model_path": "Qwen_2p5_7B_pr_data_cold_absolute_pixels_5k_image_tokens_min_image_500_1_epoch_const_20260120_224520",
-            "checkpoint": [382],
-            "model_class": "Qwen/Qwen2.5-VL-7B-Instruct",
-            "tool_config_type": ["no_tool", "zoom_in_absolute"],
-            "dataset_name": [
-                {"name": "muffin_chihuahua",
-                 "grid_pixels": [1, 2, 4, 8],
-                 "gridsize": [1, 2,
-                              4, 8, 16
-                              ],
-                 "mode": ["single_cell_query", "find_outlier"]}
-            ],
-            "max_pixels": [5000 * 28 * 28],
-            "min_pixels": [500 * 28 * 28],
-            'bbox_type': ["absolute"],
-            'strict_tool_extraction': [False],
-            'tool_padding': [0.1], #, 0.05, 0.0
-            'max_tokens_per_reply': [1024],
-            #'temperature': [1.0],
-            #'num_generations': ["dataset_dependent"],
-            "evaluate": False,
-            "analyze": False,  # later+
-        },
-    ]
-
-    return models_input
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Evaluate VLM model performance', formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('--config_path', type=str, default=None,
@@ -503,8 +388,10 @@ if __name__ == "__main__":
                         model_class: only "Qwen/Qwen2.5-VL-7B-Instruct" is currently supported,
                         tool_config_type*: choose from "no_tool", "zoom_in_absolute", 
                                           needed for Pixel Reasoner evaluation: "PR_crop_image_normalized,select_frames"
-                        dataset_name: dict with keys "name", "path" and optional "grid_pixels"*, "grid_size"* 
-                                                 and "mode"* ("single_cell_query" or "find_outlier") for M&C dataset,
+                        dataset_name: list of dicts with keys "name" and "path". For non-M&C datasets,
+                                                 "path" is the download_data.py --out_dir (holding test.jsonl + images).
+                                                 For M&C ("muffin_chihuahua"), "path" is the generated splits dir plus
+                                                 "grid_pixels"*, "gridsize"* and "mode"* ("single_cell_query"/"find_outlier"),
                         max_pixels*: maximum number of pixels per image,
                         min_pixels*: minimum number of pixels per image,
                         bbox_type*: if not given, absolute or relative bboxes are allowed if "absolute" then only absolute bboxes are allowed

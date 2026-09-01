@@ -19,7 +19,7 @@
     "generation_batch_size": 280,
     "gradient_checkpointing": true,
     "torch_dtype": "bfloat16",
-    "attn_implementation": "sdpa",
+    "attn_implementation": "flash_attention_2",
     "bf16": true,
     "logging_steps": 1,
     "logging": true,

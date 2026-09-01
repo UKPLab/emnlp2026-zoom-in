@@ -7,8 +7,6 @@ from functools import partial
 from aim.hugging_face import AimCallback
 from trl import GRPOConfig, ModelConfig, ScriptArguments, TrlParser, get_peft_config
 
-import determined as det
-
 from open_r1.utils.logger import setup_project_logging
 from open_r1.utils.tools import Tool, Message, TOOL_CONFIGS
 from open_r1.utils.rewards import curiosity_reward, pr_penalty_reward, format_reward, accuracy_reward, \
@@ -464,8 +462,6 @@ class GRPOModelConfig(ModelConfig):
 def get_vlm_module(model_name_or_path):
     if "qwen" in model_name_or_path.lower() or "pixelreasoner" in model_name_or_path.lower():
         return Qwen2VLModule
-    elif "internvl" in model_name_or_path.lower():
-        return InvernVLModule
     else:
         raise ValueError(f"Unsupported model: {model_name_or_path}")
 
@@ -489,16 +485,7 @@ def main(script_args, training_args, model_args):
         aim_callback = None
         logger = setup_project_logging(log_file=None)
 
-    if script_args.training_mode == "singlenode":
-        logger.info(f"single node training!")
-        vllm_address = None
-    elif script_args.training_mode == "multinode":
-        logger.info(f"multi node training!")
-        info = det.get_cluster_info()
-        container_addrs = info.container_addrs
-        vllm_address = container_addrs[-1]
-    else:
-        raise ValueError(f"Unsupported mode: {script_args.training_mode}")
+    vllm_address = None
 
     processor_init_kwargs = {
         "max_pixels": script_args.max_pixels,

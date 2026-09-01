@@ -7,8 +7,10 @@ Canonical record (one JSON object per line)::
 
     {"problem": <str>, "image": <str|list[str]>, "solution": <str|list[str]>}
 
-``image`` paths are written relative to an ``images/`` folder that sits next to
-the produced ``test.jsonl``; point the train/eval scripts at that folder.
+Everything for a dataset lands under ``--out_dir``: the produced ``test.jsonl`` plus
+its images (extracted b64 images under ``images/``, or the repo's own ``images/`` /
+``data/`` folders). ``image`` paths in the JSONL are relative to ``--out_dir``, so
+pass ``--image_folders <out_dir>`` / ``--image_filepath <out_dir>`` to train/eval.
 
 Usage::
 
@@ -18,11 +20,11 @@ Usage::
     # re-convert already-downloaded files without downloading again:
     python download_data.py --dataset mme_lite --out_dir /data/mme_lite --no_download
 
-Provenance note: for V* we use PixelReasoner's packaging of the benchmark (as in
-the paper), whose canonical original is ``craigwu/vstar_bench``. The exact
-download layout of the training sets (Pixel-Reasoner, VisualProbe, DeepEyes) and
-V* can vary between releases -- verify the produced ``test.jsonl`` before a full
-run (a partial download is enough to check the format).
+Provenance notes: for V* we use PixelReasoner's packaging of the benchmark (as in
+the paper); the original ``craigwu/vstar_bench`` has a different format. DeepEyes
+short answers were distilled with an LLM (single nouns for rule-based reward) and
+ship as ``assets/deepeyes_short_answer.jsonl``. Dataset layouts can change between
+releases -- verify the produced ``test.jsonl`` before a full run.
 """
 import argparse
 import ast
@@ -30,6 +32,7 @@ import base64
 import json
 import os
 import uuid
+import zipfile
 
 import numpy as np
 import pandas as pd
@@ -68,6 +71,21 @@ def download_hf_dir(repo_id, save_dir, revision="main"):
         local_dir_use_symlinks=False,
         resume_download=True,
     )
+
+
+def unzip_into(out_dir, archive):
+    """Extract ``archive`` (relative to ``out_dir``) into ``out_dir``. Idempotent:
+    skips extraction if the archive's contents already appear to be present."""
+    arc_path = os.path.join(out_dir, archive)
+    if not os.path.exists(arc_path):
+        raise FileNotFoundError(f"expected archive {arc_path} not found")
+    with zipfile.ZipFile(arc_path) as z:
+        members = [m for m in z.namelist() if not m.endswith("/")]
+        if members and os.path.exists(os.path.join(out_dir, members[0])):
+            print(f"{archive} already extracted, skipping")
+            return
+        z.extractall(out_dir)
+        print(f"extracted {archive} ({len(members)} files) -> {out_dir}")
 
 
 # --------------------------------------------------------------------------- #
@@ -148,6 +166,10 @@ CANONICAL_CONVERTERS = {
 # filters, normalises columns). Kept per-dataset, faithful to the original prep.
 # --------------------------------------------------------------------------- #
 def load_intermediate_df(source_file_path, dataset, img_output_dir, dataset_format="parquet"):
+    if not os.path.exists(source_file_path):
+        raise FileNotFoundError(
+            f"source file {source_file_path} not found — check the dataset's expected "
+            f"layout (source_file) and that the download/unzip completed")
     if dataset_format == "parquet":
         df = pd.read_parquet(source_file_path)
     elif dataset_format == "json":
@@ -171,8 +193,10 @@ def load_intermediate_df(source_file_path, dataset, img_output_dir, dataset_form
         df["answer"] = df["answer"].astype(str)
 
     elif dataset in ("hr_bench_4k", "hr_bench_8k"):
+        # b64 images are extracted into <out_dir>/images/; store the path relative
+        # to <out_dir> so every dataset uses the same image folder (see module docstring).
         df["question"] = df["question"].astype(str)
-        df["image"] = df["image"].apply(lambda x: save_b64_image(x, img_output_dir))
+        df["image"] = df["image"].apply(lambda x: "images/" + save_b64_image(x, img_output_dir))
         df["answer"] = df["answer"].astype(str)
         for col in ("A", "B", "C", "D"):
             df[col] = df[col].astype(str)
@@ -183,23 +207,24 @@ def load_intermediate_df(source_file_path, dataset, img_output_dir, dataset_form
         if full_len != len(df):
             print(f"dropped {full_len - len(df)} rows with non-jpg images")
         df["question"] = df["question"].astype(str)
-        df["image"] = df["bytes"].apply(lambda x: save_b64_image(x, img_output_dir))
+        df["image"] = df["bytes"].apply(lambda x: "images/" + save_b64_image(x, img_output_dir))
         df["answer"] = df["answer"].astype(str)
         df["multi-choice options"] = df["multi-choice options"].apply(
             lambda x: [str(y) for y in x.tolist()] if isinstance(x, np.ndarray) else x)
 
     elif dataset == "visual_probe_train":
+        # images ship flat under data/ in the repo; keep that path (relative to out_dir).
         df["question"] = df["problem"].apply(lambda s: s.removeprefix("<image>\n"))
         df["answer"] = df["solution"].apply(lambda s: s.strip())
-        df["image"] = df["images"].apply(lambda xx: [f"images/{x.split('/')[-1]}" for x in xx])
+        df["image"] = df["images"].apply(lambda xx: [f"data/{x.split('/')[-1]}" for x in xx])
 
     elif dataset == "deepeyes_train_4k":
-        # DeepEyes ships long answers; short answers come from a sibling file
-        # (deepeyes_short_answer.jsonl) that must be present next to the source.
+        # DeepEyes ships only long (LLM-judge) answers; we reward rule-based against
+        # single-noun short answers we distilled with an LLM, shipped as a repo asset.
         df["question"] = df["problem"].apply(lambda s: s.removeprefix("<image>\n"))
-        df["image"] = df["images"].apply(lambda xx: [f"images/{x.split('/')[-1]}" for x in xx])
-        short_answer_path = os.path.join(os.path.dirname(os.path.abspath(source_file_path)),
-                                         "deepeyes_short_answer.jsonl")
+        df["image"] = df["images"].apply(lambda xx: [f"data/{x.split('/')[-1]}" for x in xx])
+        short_answer_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                         "assets", "deepeyes_short_answer.jsonl")
         df_short = pd.read_json(short_answer_path, lines=True)
         assert df["question"].equals(df_short["question"]), "short-answer file is misaligned"
         df["answer"] = df_short["answer"].values
@@ -249,31 +274,32 @@ DATASETS = {
         "url_tmpl": "https://huggingface.co/datasets/yifanzhang114/MME-RealWorld-Lmms-eval/resolve/main/data/train-{i:05d}-of-{n:05d}.parquet",
         "shards": 70,
     },
-    # Training / eval sets pulled as whole HF repos. `source_file` is the text
-    # file inside the repo; verify it for your download (layouts vary by release).
+    # Training / eval sets pulled as whole HF repos (snapshot_download).
     "pixel_reasoner": {  # training data (drops video + multi-image records)
         "type": "hf_dir",
         "repo_id": "TIGER-Lab/PixelReasoner-RL-Data",
-        "source_file": "train.jsonl",
-        "source_format": "json",
+        "source_file": "release.parquet",
+        "source_format": "parquet",
+        "unzip": ["images.zip"],  # -> images/
     },
     "visual_probe_train": {
         "type": "hf_dir",
         "repo_id": "Mini-o3/VisualProbe_train",
         "source_file": "train.json",
-        "source_format": "json",
+        "source_format": "json",  # images ship flat under data/
     },
-    "deepeyes_train_4k": {
+    "deepeyes_train_4k": {  # also needs assets/deepeyes_short_answer.jsonl (shipped in repo)
         "type": "hf_dir",
         "repo_id": "Mini-o3/DeepEyes_train_4K",
         "source_file": "train.json",
-        "source_format": "json",
+        "source_format": "json",  # images ship flat under data/
     },
-    "pixel_reasoner_vstar": {  # paper uses PixelReasoner's packaging; original below
-        "type": "hf_dir",
-        "repo_id": "craigwu/vstar_bench",
-        "source_file": "test.jsonl",
-        "source_format": "json",
+    "pixel_reasoner_vstar": {  # PixelReasoner's V* packaging (as used in the paper);
+        "type": "hf_dir",       # original is craigwu/vstar_bench (different format).
+        "repo_id": "JasperHaozhe/VStar-EvalData-PixelReasoner",
+        "source_file": "vstar.parquet",
+        "source_format": "parquet",
+        "unzip": ["images.zip"],  # -> images/
     },
 }
 
@@ -312,6 +338,8 @@ def main():
     elif cfg["type"] == "hf_dir":
         if not args.no_download:
             download_hf_dir(cfg["repo_id"], args.out_dir)
+        for archive in cfg.get("unzip", []):
+            unzip_into(args.out_dir, archive)
         source_path = os.path.join(args.out_dir, cfg["source_file"])
         total = convert_to_jsonl(source_path, out_jsonl, args.dataset,
                                  dataset_format=cfg["source_format"])

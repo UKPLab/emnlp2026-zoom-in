@@ -10,7 +10,7 @@ This repository provides the code for our paper "Learning to Zoom Efficiently wi
 It contains code to recreate our proposed M&C dataset and run training and evaluation to reproduce our results.
 
 ## Setup
-First, do ``pip install --no-deps -r requirements.txt`` in python 3.12.
+First, do ``pip install --no-deps -r requirements.txt`` in python 3.12, followed by `pip install --no-build-isolation flash-attn==2.7.4.post1`.
 
 ## Dataset construction
 Note: Due to copyright issues we can not distribute the dataset directly. You need to rebuild it.
@@ -95,18 +95,49 @@ train_scheduler.py
 Sample scripts are given in the `scripts` directory but the paths need to be adapted to your setup.
 ## Evaluation
 
-For evaluation, specify the dataset paths in `initiate_analysis.py` and enable evaluation
-in its `get_models_input` method. 
+Evaluation is driven by `initiate_analysis.py` and a JSON config in `configs/eval/`
+(see `configs/eval/sample_config.json`). To run the evaluations defined in a config:
 
+```
+python initiate_analysis.py --config_path configs/eval/<your_config>.json --evaluate
+```
 
+The config describes the model and the datasets, plus a grid of evaluation settings. Key fields:
+
+- `model_path`, `model_class` (currently `Qwen/Qwen2.5-VL-7B-Instruct`), `short_name`, and optional `output_path` (defaults to `model_path`).
+- `dataset_name`: a list of `{"name", "path"}` dicts. For the third-party benchmarks, `path` is the
+  `download_data.py --out_dir` (which holds `test.jsonl` + images). For the M&C dataset, use
+  `"name": "muffin_chihuahua"` with `path` = the generated splits dir and the lists `grid_pixels`,
+  `gridsize`, `mode` (`single_cell_query` / `find_outlier`) — these expand into one eval per grid config.
+- `tool_config_type`: e.g. `no_tool`, `zoom_in_absolute` (for Pixel-Reasoner: `PR_crop_image_normalized,select_frames`).
+- outcome-relevant knobs: `max_pixels`, `min_pixels`, `bbox_type`, `strict_tool_extraction`,
+  `tool_padding`, `max_tokens_per_reply`, `temperature`, `num_generations`.
+
+Every field marked as a list is expanded over the Cartesian product, so a single config can launch
+many evaluations. Use `--exist_behaviour {raise,overwrite,skip}` to control what happens when an
+eval's output already exists. Each run writes its raw outputs (`full_results.json`, `command.txt`,
+tool-call artifacts) under the model's output directory. See `python initiate_analysis.py --help`
+for the full field list.
 
 ## Model analysis
 
-For model analysis, specify the dataset paths in `initiate_analysis.py` and enable evaluation
-in its `get_models_input` method. 
+Once evaluations have run, aggregate them into a metrics table:
+
+```
+python initiate_analysis.py --config_path configs/eval/<your_config>.json --analyse \
+    --metrics accuracy avg_pixel_reasoning zoom_in_fraction_median
+```
+
+`--analyse` reads each eval's `full_results.json` and prints a CSV table with one row per eval
+(you can pass `--evaluate --analyse` together to do both). Commonly used `--metrics` are
+`accuracy`, `accuracy_if_tool_used` / `accuracy_if_tool_not_used`, `avg_pixel_reasoning` (mean tool
+uses), `pixel_reasoning_distr`, `avg_first_completion_len` / `avg_total_completion_len`,
+`zoom_in_fraction_median`, `tool_success_rate`, and the localization metrics `ious` / `iou_std`,
+`precision` / `recall` (with `_std`). If `--metrics` is omitted a sensible default set is used; the
+full list is documented in `--help`.
 
 ## Contact
-Responsible person: Falko Helm, mail: falko.helm@tu-darmstadt.de, github: falko1
+Responsible person: Falko Helm — [falko.helm@tu-darmstadt.de](mailto:falko.helm@tu-darmstadt.de) · GitHub: [falko1](https://github.com/falko1)
 
 Affiliations: 
 - UKP Lab: https://www.informatik.tu-darmstadt.de/ukp/ukp_home/index.en.jsp
@@ -116,7 +147,14 @@ Affiliations:
 
 If you find this repo helpful, please consider citing us:
 
-Helm, Falko and Gurevych, Iryna: Learning to Zoom Efficiently with a Contrastive Curriculum. To appear in Empirical Methods of Natural Language Processing (EMNLP) 2026
+```bibtex
+@inproceedings{helm_zoom_in_2026,
+  title     = {Learning to Zoom Efficiently with a Contrastive Curriculum},
+  author    = {Helm, Falko and Gurevych, Iryna},
+  booktitle = {Proceedings of the 2026 Conference on Empirical Methods in Natural Language Processing (EMNLP)},
+  year      = {2026}
+}
+```
 
 
 

@@ -276,8 +276,8 @@ if __name__ == "__main__":
 
     runs = [
         {
-            "json_name": "Ours_local.json",
-            "shell_number": 5,
+            "json_name": "Ours.json",
+            "shell_number": 1,
             "path": "",
             "state": "to_be_launched"
         },

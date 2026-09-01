@@ -9,7 +9,9 @@
           "path": "/path/to/MC/splits",
          "grid_pixels": [4],
          "gridsize": [1,2,4,8,16],
-         "mode": ["single_cell_query"]}
+         "mode": ["single_cell_query"]},
+        {"name": "pixel_reasoner_vstar",
+          "path": "/path/to/vstar_out_dir (download_data.py --out_dir; holds test.jsonl + images)"}
     ],
     "max_pixels": [3920000],
     "min_pixels": [392000],
