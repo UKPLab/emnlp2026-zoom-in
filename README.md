@@ -156,7 +156,8 @@ If you find this repo helpful, please consider citing us:
 }
 ```
 
-
+## Acknowledgements
+The code was adapted from https://github.com/om-ai-lab/VLM-R1.
 
 ## Disclaimer
 This repository contains experimental software and is published for the sole purpose of giving additional background details on the respective publication. 
