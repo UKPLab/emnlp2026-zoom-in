@@ -6,7 +6,7 @@
 
 ## Overview
 
-This repository provides the code for our paper "Learning to Zoom Efficiently with a Contrastive Curriculum", accepted to EMNLP 2026.
+This repository provides the code for our paper [Learning to Zoom Efficiently with a Contrastive Curriculum](https://arxiv.org/abs/2609.03206), accepted to EMNLP 2026.
 It contains code to recreate our proposed M&C dataset and run training and evaluation to reproduce our results.
 
 ## Setup
