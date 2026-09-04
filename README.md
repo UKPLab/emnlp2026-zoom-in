@@ -7,7 +7,7 @@
 ## Overview
 
 This repository provides the code for our paper [Learning to Zoom Efficiently with a Contrastive Curriculum](https://arxiv.org/abs/2609.03206), accepted to EMNLP 2026.
-It contains code to recreate our proposed M&C dataset and run training and evaluation to reproduce our results.
+It contains code to recreate our proposed M&C dataset and run training and evaluation to reproduce our results. Our trained models can be found on [huggingface](https://huggingface.co/collections/UKPLab/zoom-in) and should be evaluated with the code from this repo.
 
 ## Setup
 First, do ``pip install --no-deps -r requirements.txt`` in python 3.12, followed by `pip install --no-build-isolation flash-attn==2.7.4.post1`.
